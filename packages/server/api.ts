@@ -58,7 +58,7 @@ import {
   removeCredential,
 } from "../storage/credentials";
 import { starterStoryboard, inferredPalette } from "../director";
-import { rateLimit, cloudDatabase } from "../storage/client";
+import { rateLimit, cloudDatabase, lockAccount } from "../storage/client";
 import { readAsset } from "../storage/media";
 import {
   writeObject,
@@ -332,12 +332,34 @@ async function dispatch(req: Request, p: string[]): Promise<Response> {
           metadata: z.record(z.string(), z.unknown()).default({}),
         })
         .parse(await body(req));
-      const state = { ...b, chunks: Math.ceil(b.bytes / (1024 * 1024)) },
-        id = randomUUID();
-      await db
-        .prepare("INSERT INTO uploads VALUES(?,?,?,?)")
-        .run(id, p[1], JSON.stringify(state), Date.now());
-      return json({ id, ...state });
+      return tx(async () => {
+        await lockAccount(captureOwner);
+        const pending = await db
+          .prepare(
+            "SELECT u.data FROM uploads u JOIN projects p ON p.id=u.projectId WHERE p.owner=? AND u.createdAt>?",
+          )
+          .all(captureOwner, Date.now() - 86400000);
+        const unfinished = pending
+          .map((r) => JSON.parse(r.data))
+          .filter((x) => !x.assetId);
+        if (
+          unfinished.length >= 20 ||
+          unfinished.reduce((n, x) => n + x.bytes, 0) +
+            (await projectStorage(captureOwner)) +
+            b.bytes >
+            1024 * 1048576
+        )
+          throw new HttpError(
+            400,
+            "Finish existing uploads or wait for incomplete uploads to expire before adding more media.",
+          );
+        const state = { ...b, chunks: Math.ceil(b.bytes / 1048576) },
+          id = randomUUID();
+        await db
+          .prepare("INSERT INTO uploads VALUES(?,?,?,?)")
+          .run(id, p[1], JSON.stringify(state), Date.now());
+        return json({ id, ...state });
+      });
     }
     const bytes = await readBounded(req.body),
       name = decodeURIComponent(req.headers.get("x-cue-name") || "capture.png");

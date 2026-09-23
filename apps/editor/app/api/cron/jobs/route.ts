@@ -1,3 +1,4 @@
+import { cleanupTemporaryObjects } from "../../../../../../packages/cloud/cleanup";
 import { db } from "../../../../../../packages/storage/db";
 import { dispatchJob } from "../../../../../../packages/cloud/dispatch";
 import { safeEqual } from "../../../../../../packages/storage/config";
@@ -17,5 +18,6 @@ export async function GET(req: Request) {
     )
     .all(Date.now());
   for (const row of rows) await dispatchJob(row.id);
-  return Response.json({ checked: rows.length });
+  const cleaned = await cleanupTemporaryObjects();
+  return Response.json({ checked: rows.length, cleaned });
 }

@@ -17,11 +17,15 @@ const children = [
       env: { ...process.env, CUE_ROOT: root },
     },
   ),
-  spawn(process.execPath, ["--import", "tsx", "apps/worker/main.ts"], {
-    cwd: root,
-    stdio: "inherit",
-    env: { ...process.env, CUE_ROOT: root },
-  }),
+  ...(process.env.DATABASE_URL
+    ? [
+        spawn(process.execPath, ["--import", "tsx", "apps/worker/main.ts"], {
+          cwd: root,
+          stdio: "inherit",
+          env: { ...process.env, CUE_ROOT: root },
+        }),
+      ]
+    : []),
 ];
 for (const signal of ["SIGINT", "SIGTERM"] as NodeJS.Signals[])
   process.on(signal, () => children.forEach((c) => c.kill(signal)));
