@@ -10,7 +10,7 @@ Reviewed commit: `f072dfa969b0a3b3141827214b548ca60f5018d6` (`origin/main` at in
 
 Vendored file: `apps/extension/vendor/site-dna-readiness.js`. This is SiteDNA's rendered-state readiness expression adapted to a browser extension module. Cue adds bounded font/image waits and capture navigation-epoch checks around it. Route selection, pixel capture/redaction, recording, uploads, editing, providers and compositing are new Cue implementation.
 
-The source repository did not expose a root license at review. Keep this application private until the owner confirms redistribution terms. Do not infer an open-source license from public repository visibility.
+The source repository did not expose a root license at review. The owner of both repositories explicitly authorized publishing Cue on September 23, 2026. This records that publication authorization; it does not assign an open-source license to SiteDNA or Cue. Do not infer a license from public visibility.
 
 ## Other dependencies
 
