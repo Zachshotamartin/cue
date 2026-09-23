@@ -4,7 +4,7 @@ The application now uses Supabase Auth and PostgreSQL, private Vercel Blob asset
 
 ## Verified for the current implementation
 
-- TypeScript, the optimized Next.js/Workflow build, and **51 automated checks** pass. Auth checks cover CSRF, password validation, email callback redirects, token-free JSON, recovery authentication, throttling and bounded request bodies. Existing checks cover tenant isolation, revisions, uploads, encryption and provider-job recovery.
+- TypeScript, the optimized Next.js/Workflow build, and **54 automated checks** pass. Auth checks cover CSRF, password validation, email callback redirects, token-free JSON, recovery authentication, throttling and bounded request bodies. Existing checks cover tenant isolation, revisions, uploads, encryption and provider-job recovery.
 - A real Supabase database passed migrations, owner isolation, concurrent revision conflicts, job idempotency/budget reservations, exclusive claims, rate limits and saved snapshots. Synthetic verification rows were cleaned up. Database TLS verifies the provider CA and hostname; SSL is enforced server-side.
 - Cue tables live in the private cue schema with RLS enabled and no public grants. Anonymous Supabase Data API access to that schema was rejected with PGRST106.
 - The private Vercel Blob store passed authenticated write/read and rejected anonymous reads. Production dependency audit reported zero known vulnerabilities after the Supabase migration.
@@ -15,6 +15,7 @@ The application now uses Supabase Auth and PostgreSQL, private Vercel Blob asset
 - Two synthetic Supabase accounts signed in through Cue. Session cookies were HTTP-only, Secure and SameSite=Lax; no auth tokens appeared in JSON.
 - A project created on the staged deployment retained its revision and edits through fresh requests on the promoted domain. Anonymous access returned 401, a different account received 404, and cross-origin writes returned 403.
 - A synthetic provider key was saved through Settings and encrypted in PostgreSQL. Neither account received the raw value; the second account did not receive its suffix. Removal passed. The key was never sent to a provider.
+- Renderer lifecycle checks prevent SDK command inspection from resuming stopped compute and preserve exports even if compute has already ended.
 - After a second production deployment, the saved test project and both exported video assets remained accessible.
 - The owner created and verified a real account. Three local projects, including the original 14-second film, were imported with media and revision history; rerunning the import skipped all three without duplicates. The two historical verification films were archived, not deleted. The original local data remains intact.
 - Real Vercel Workflow/Sandbox exports completed in landscape (1920 × 1080) and portrait (1080 × 1920), with H.264 video and audio. Both two-second films measured 2.048 seconds including audio padding. They were retrieved from private storage and inspected locally. Captions and the project ZIP also passed.

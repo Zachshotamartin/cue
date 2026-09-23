@@ -7,7 +7,7 @@ export async function advanceRender(job: Job) {
   let sandbox: Sandbox | undefined;
   try {
     if (job.sandboxId) {
-      sandbox = await Sandbox.get({ name: job.sandboxId });
+      sandbox = await Sandbox.get({ name: job.sandboxId, resume: false });
       if (job.cancelRequested) {
         await sandbox.stop();
         await updateJob(job, { state: "cancelled", leaseUntil: 0 });
@@ -15,6 +15,8 @@ export async function advanceRender(job: Job) {
       }
       if (Date.now() - Date.parse(job.createdAt) > 1800000)
         throw new Error("Render exceeded its 30-minute time limit.");
+      if (sandbox.status !== "running")
+        throw new Error("Render compute is no longer running.");
       if (!job.commandId) {
         await startRenderer(sandbox, job);
         return;
@@ -82,8 +84,10 @@ export async function advanceRender(job: Job) {
 }
 export async function stopRender(id: string) {
   const j = await getJob(id);
-  if (j.sandboxId)
-    await (await Sandbox.get({ name: j.sandboxId })).stop().catch(() => {});
+  if (j.sandboxId) {
+    const sandbox = await Sandbox.get({ name: j.sandboxId, resume: false });
+    if (sandbox.status === "running") await sandbox.stop();
+  }
 }
 
 async function startRenderer(sandbox: Sandbox, job: Job) {
