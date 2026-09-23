@@ -13,6 +13,7 @@ import { GET, POST } from "../apps/editor/app/api/auth/[...path]/route";
 import { GET as callback } from "../apps/editor/app/auth/callback/route";
 import { boundedText, RequestTooLarge } from "../packages/server/request-body";
 import { postgresConfiguration } from "../packages/storage/postgres";
+import { assertOwner, assertSameOrigin } from "../packages/storage/auth";
 const origin = "http://127.0.0.1:5303";
 const context = (action: string) => ({
   params: Promise.resolve({ path: [action] }),
@@ -33,6 +34,107 @@ afterEach(() => {
   vi.resetAllMocks();
 });
 describe("server-only Supabase authentication", () => {
+  const proxiedRequest = (source = origin, host = "127.0.0.1:5303") =>
+    new Request("http://localhost:5303/api/auth/sign-in", {
+      method: "POST",
+      headers: { host, origin: source },
+      body: JSON.stringify({
+        email: "test@example.com",
+        password: "test-password",
+      }),
+    });
+  it("accepts the configured browser origin when Next rewrites the internal URL", async () => {
+    const signInWithPassword = vi.fn().mockResolvedValue({ error: null });
+    mocks.getAuth.mockResolvedValue({ auth: { signInWithPassword } });
+    const r = await POST(proxiedRequest(), context("sign-in"));
+    expect(r.status).toBe(200);
+    expect(signInWithPassword).toHaveBeenCalledOnce();
+  });
+  it.each([
+    "http://localhost:5303",
+    "http://127.0.0.1:5304",
+    "https://127.0.0.1:5303",
+    "null",
+    "",
+    "https://evil.test",
+  ])(
+    "rejects the mismatched browser origin %s before auth or storage",
+    async (source) => {
+      const r = await POST(proxiedRequest(source), context("sign-in"));
+      expect(r.status).toBe(403);
+      expect(mocks.getAuth).not.toHaveBeenCalled();
+      expect(mocks.rateLimit).not.toHaveBeenCalled();
+    },
+  );
+  it("does not trust forwarded hosts or an unconfigured request host", () => {
+    const req = proxiedRequest("https://evil.test", "evil.test");
+    req.headers.set("x-forwarded-host", "127.0.0.1:5303");
+    req.headers.set("x-forwarded-proto", "http");
+    expect(() => assertSameOrigin(req)).toThrow("Request host is not allowed.");
+    const configured = proxiedRequest("https://evil.test");
+    configured.headers.set("x-forwarded-host", "evil.test");
+    expect(() => assertSameOrigin(configured)).toThrow(
+      "Request origin is not allowed.",
+    );
+  });
+  it("allows only HTTPS same-origin requests on the configured Vercel deployment", () => {
+    vi.stubEnv("VERCEL_URL", "cue-preview.vercel.app");
+    expect(
+      assertSameOrigin(
+        proxiedRequest(
+          "https://cue-preview.vercel.app",
+          "cue-preview.vercel.app",
+        ),
+      ),
+    ).toBe("https://cue-preview.vercel.app");
+    expect(() =>
+      assertSameOrigin(
+        proxiedRequest(
+          "http://cue-preview.vercel.app",
+          "cue-preview.vercel.app",
+        ),
+      ),
+    ).toThrow();
+    expect(() =>
+      assertSameOrigin(proxiedRequest(origin, "cue-preview.vercel.app")),
+    ).toThrow();
+  });
+  it("uses the same origin guard for authenticated editor writes", async () => {
+    mocks.currentUser.mockResolvedValue({
+      id: "test-owner",
+      emailVerified: true,
+    });
+    expect(await assertOwner(proxiedRequest(), true)).toBe("test-owner");
+    await expect(
+      assertOwner(proxiedRequest("http://localhost:5303")),
+    ).rejects.toThrow("Request origin is not allowed.");
+  });
+  it("keeps email links and callback redirects on the browser host", async () => {
+    const signUp = vi.fn().mockResolvedValue({ error: null });
+    mocks.getAuth.mockResolvedValue({
+      auth: { signUp, verifyOtp: vi.fn().mockResolvedValue({ error: null }) },
+    });
+    const req = new Request("http://localhost:5303/api/auth/sign-up", {
+      method: "POST",
+      headers: { host: "127.0.0.1:5303", origin },
+      body: JSON.stringify({
+        email: "test@example.com",
+        name: "Test",
+        password: "long-test-password",
+      }),
+    });
+    expect((await POST(req, context("sign-up"))).status).toBe(200);
+    expect(signUp.mock.calls[0][0].options.emailRedirectTo).toBe(
+      `${origin}/auth/callback`,
+    );
+    const redirected = await callback(
+      new Request(
+        "http://localhost:5303/auth/callback?token_hash=test&type=signup",
+        { headers: { host: "127.0.0.1:5303" } },
+      ),
+    );
+    expect(redirected.headers.get("location")).toBe(`${origin}/projects`);
+  });
   it("does not call auth or the database for cross-origin writes", async () => {
     const r = await POST(
       request("sign-in", {}, "https://elsewhere.test"),
@@ -43,17 +145,15 @@ describe("server-only Supabase authentication", () => {
     expect(mocks.rateLimit).not.toHaveBeenCalled();
   });
   it("does not return provider sessions or tokens in JSON", async () => {
-    const signInWithPassword = vi
-      .fn()
-      .mockResolvedValue({
-        data: {
-          session: {
-            access_token: "private-access",
-            refresh_token: "private-refresh",
-          },
+    const signInWithPassword = vi.fn().mockResolvedValue({
+      data: {
+        session: {
+          access_token: "private-access",
+          refresh_token: "private-refresh",
         },
-        error: null,
-      });
+      },
+      error: null,
+    });
     mocks.getAuth.mockResolvedValue({ auth: { signInWithPassword } });
     const r = await POST(
       request("sign-in", {

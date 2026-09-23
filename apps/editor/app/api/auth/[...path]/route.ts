@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { getAuth, currentUser } from "../../../../lib/auth-server";
-import { assertHost, HttpError } from "../../../../../../packages/storage/auth";
+import {
+  assertHost,
+  assertSameOrigin,
+  HttpError,
+} from "../../../../../../packages/storage/auth";
 import { rateLimit } from "../../../../../../packages/storage/client";
 import { createHash } from "node:crypto";
 import {
@@ -44,12 +48,7 @@ export async function POST(
   ctx: { params: Promise<{ path: string[] }> },
 ) {
   try {
-    assertHost(req);
-    if (req.headers.get("origin") !== new URL(req.url).origin)
-      return json(
-        { error: { message: "Request origin is not allowed." } },
-        403,
-      );
+    const publicOrigin = assertSameOrigin(req);
     if (!process.env.SUPABASE_URL)
       return json(
         { error: { message: "Supabase account setup is not complete yet." } },
@@ -92,7 +91,7 @@ export async function POST(
     const text = await boundedText(req, 4096);
     const body = JSON.parse(text || "{}");
     const auth = (await getAuth()).auth;
-    const callback = new URL("/auth/callback", req.url);
+    const callback = new URL("/auth/callback", publicOrigin);
     let result;
     switch (action) {
       case "sign-up": {
