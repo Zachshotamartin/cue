@@ -1,6 +1,6 @@
 # Cue production implementation plan
 
-Status: implementation in progress. The original local application is not a production release.
+Status: cloud accounts, storage and rendering are deployed and verified. Public email delivery, owner-account import and real AI provider checks remain release gates; see VERIFICATION.md.
 
 ## Product contract
 

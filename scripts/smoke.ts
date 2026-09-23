@@ -89,11 +89,18 @@ for (const format of ["landscape", "portrait"] as const) {
   });
   revision = edited.project.revision;
   const { job } = await api(`projects/${p.id}/render`, "POST", { revision });
-  const deadline = Date.now() + 180000;
+  const deadline =
+    Date.now() + Number(process.env.CUE_TEST_TIMEOUT_MS || 180000);
+  let reported = "";
   let completed: Asset | undefined;
   while (Date.now() < deadline) {
     const snapshot = await api(`projects/${p.id}`);
     const result = snapshot.jobs.find((j: any) => j.id === job.id);
+    const stage = `${format}: ${result.state} (${result.progress}%)`;
+    if (stage !== reported) {
+      console.log(stage);
+      reported = stage;
+    }
     assert(
       !["failed", "unknown", "cancelled"].includes(result.state),
       result.error || result.state,

@@ -1,6 +1,6 @@
 # Production upgrade verification — September 23, 2026
 
-The application now uses Supabase Auth and PostgreSQL, private Vercel Blob assets, and account-owned encrypted provider credentials. The public source repository is https://github.com/Zachshotamartin/cue. Vercel is configured for manual deployment.
+The application now uses Supabase Auth and PostgreSQL, private Vercel Blob assets, and account-owned encrypted provider credentials. The public source repository is https://github.com/Zachshotamartin/cue. Vercel was deployed manually to https://cue-tau-green.vercel.app.
 
 ## Verified for the current implementation
 
@@ -10,9 +10,16 @@ The application now uses Supabase Auth and PostgreSQL, private Vercel Blob asset
 - The private Vercel Blob store passed authenticated write/read and rejected anonymous reads. Production dependency audit reported zero known vulnerabilities after the Supabase migration.
 - Vercel upload inputs were audited. Environment files, local databases, test data and provisioning credentials are excluded explicitly by .vercelignore.
 
+## Verified on the deployed application
+
+- Two synthetic Supabase accounts signed in through Cue. Session cookies were HTTP-only, Secure and SameSite=Lax; no auth tokens appeared in JSON.
+- A project created on the staged deployment retained its revision and edits through fresh requests on the promoted domain. Anonymous access returned 401, a different account received 404, and cross-origin writes returned 403.
+- A synthetic provider key was saved through Settings and encrypted in PostgreSQL. Neither account received the raw value; the second account did not receive its suffix. Removal passed. The key was never sent to a provider.
+- Real Vercel Workflow/Sandbox exports completed in landscape (1920 × 1080) and portrait (1080 × 1920), with H.264 video and audio. Both two-second films measured 2.048 seconds including audio padding. They were retrieved from private storage and inspected locally. Captions and the project ZIP also passed.
+
 ## Remaining release verification
 
-Live application authentication, deployed Workflow/Sandbox rendering and cross-browser persistence still require the first staged deployment check. Public signup and password recovery require custom SMTP: Supabase's default sender only serves organization members. Custom confirmation/recovery templates are prepared but cannot be enabled on the free plan until SMTP is configured. Default same-browser PKCE callbacks remain supported.
+Public signup and password recovery require custom SMTP: Supabase's default sender only serves organization members. Custom confirmation/recovery templates are prepared but cannot be enabled on the free plan until SMTP is configured. Default same-browser PKCE callbacks remain supported.
 
 Real Runway/Gemini/ElevenLabs generation is not certified without user-supplied keys and a live test. The authenticated Chrome capture test remains postponed at the user's request. Original local projects are preserved and can be imported after their owner creates a verified Cue account.
 
