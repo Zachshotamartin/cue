@@ -15,13 +15,15 @@ The application now uses Supabase Auth and PostgreSQL, private Vercel Blob asset
 - Two synthetic Supabase accounts signed in through Cue. Session cookies were HTTP-only, Secure and SameSite=Lax; no auth tokens appeared in JSON.
 - A project created on the staged deployment retained its revision and edits through fresh requests on the promoted domain. Anonymous access returned 401, a different account received 404, and cross-origin writes returned 403.
 - A synthetic provider key was saved through Settings and encrypted in PostgreSQL. Neither account received the raw value; the second account did not receive its suffix. Removal passed. The key was never sent to a provider.
+- After a second production deployment, the saved test project and both exported video assets remained accessible.
+- The owner created and verified a real account. Three local projects, including the original 14-second film, were imported with media and revision history; rerunning the import skipped all three without duplicates. The two historical verification films were archived, not deleted. The original local data remains intact.
 - Real Vercel Workflow/Sandbox exports completed in landscape (1920 × 1080) and portrait (1080 × 1920), with H.264 video and audio. Both two-second films measured 2.048 seconds including audio padding. They were retrieved from private storage and inspected locally. Captions and the project ZIP also passed.
 
 ## Remaining release verification
 
 Public signup and password recovery require custom SMTP: Supabase's default sender only serves organization members. Custom confirmation/recovery templates are prepared but cannot be enabled on the free plan until SMTP is configured. Default same-browser PKCE callbacks remain supported.
 
-Real Runway/Gemini/ElevenLabs generation is not certified without user-supplied keys and a live test. The authenticated Chrome capture test remains postponed at the user's request. Original local projects are preserved and can be imported after their owner creates a verified Cue account.
+Real Runway/Gemini/ElevenLabs generation is not certified without user-supplied keys and a live test. The authenticated Chrome capture test remains postponed at the user's request. Original local projects are preserved and have been imported into the verified owner account.
 
 The historical evidence below is from the original local prototype and does not certify the account-based cloud release.
 

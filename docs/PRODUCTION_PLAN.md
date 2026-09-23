@@ -1,6 +1,6 @@
 # Cue production implementation plan
 
-Status: cloud accounts, storage and rendering are deployed and verified. Public email delivery, owner-account import and real AI provider checks remain release gates; see VERIFICATION.md.
+Status: cloud accounts, storage and rendering are deployed and verified. Public email delivery and real AI provider checks remain release gates; see VERIFICATION.md.
 
 ## Product contract
 
