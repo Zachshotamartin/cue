@@ -12,8 +12,12 @@ export function AccountSettings() {
       setMessage(r.error.message || "Sign out failed.");
       return;
     }
-    for (const k of Object.keys(localStorage))
-      if (k.startsWith("cue:recovery:")) localStorage.removeItem(k);
+    try {
+      for (const k of Object.keys(localStorage))
+        if (k.startsWith("cue:recovery:")) localStorage.removeItem(k);
+    } catch {
+      /* Sign out succeeds even when local storage is unavailable. */
+    }
     router.push("/auth/sign-in");
     router.refresh();
   }

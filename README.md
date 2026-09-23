@@ -15,9 +15,9 @@
 
 ## Production infrastructure
 
-Next.js is hosted on Vercel. Neon provides Postgres and managed authentication. Vercel Blob holds private media; Workflow and Sandbox execute durable jobs and renders. No production project relies on a developer's laptop filesystem or a shared operator API key.
+Next.js is hosted on Vercel. Supabase provides Postgres and managed authentication. Vercel Blob holds private media; Workflow and Sandbox execute durable jobs and renders. No production project relies on a developer's laptop filesystem or a shared operator API key.
 
-1. Create/link the Vercel project and provision Neon with Auth plus a private Blob store. The account holder must accept marketplace terms.
+1. Create/link the Vercel project and provision Supabase with Auth plus a private Blob store. Use a dedicated project, enable email confirmation and configure the exact application callback URLs.
 2. Configure the server-only values in `.env.example`. Generate independent 32-byte secrets; use Vercel CLI sensitive envs. Keep an encrypted operator backup of the encryption key.
 3. `npm ci`, `npm run db:migrate`, `npm run check`.
 4. Publish the source commit and set `CUE_RENDER_REF` to that commit. Deploy with the Vercel CLI. GitHub Actions is not required.

@@ -21,6 +21,20 @@ export async function advanceRender(job: Job) {
       }
       if (job.commandId) {
         const command = await sandbox.getCommand(job.commandId);
+        if (command.exitCode === 0) {
+          const fresh = await getJob(job.id);
+          if (fresh.outputAssetId) {
+            await updateJob(fresh, {
+              state: "completed",
+              progress: 100,
+              error: null,
+              leaseUntil: 0,
+            });
+            await sandbox.stop();
+            return;
+          }
+          throw new Error("Renderer exited without a saved export.");
+        }
         if (command.exitCode !== null && command.exitCode !== 0)
           throw new Error(
             "Render compute stopped before producing an export. Your sources and edits are saved.",

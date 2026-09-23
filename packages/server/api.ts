@@ -59,7 +59,6 @@ import {
 } from "../storage/credentials";
 import { starterStoryboard, inferredPalette } from "../director";
 import { rateLimit, cloudDatabase, lockAccount } from "../storage/client";
-import { readAsset } from "../storage/media";
 import {
   writeObject,
   readObject,
@@ -688,11 +687,22 @@ async function dispatch(req: Request, p: string[]): Promise<Response> {
       ),
       { name: "project.json" },
     );
-    for (const a of await assets(id))
-      archive.append(await readAsset(a), {
+    for (const a of await assets(id)) {
+      // Open one source lazily when archiver consumes it; never buffer the whole project.
+      const source = Readable.from(
+        (async function* () {
+          if (cloudObjects()) {
+            const { stream } = await streamObject(a.path);
+            yield* Readable.fromWeb(stream as any);
+          } else yield* createReadStream(assetPath(a));
+        })(),
+      );
+      source.on("error", (error) => archive.destroy(error));
+      archive.append(source, {
         name: `assets/${path.basename(a.path)}`,
       });
-    void archive.finalize();
+    }
+    void archive.finalize().catch((error) => archive.destroy(error));
     return new Response(Readable.toWeb(archive) as ReadableStream<Uint8Array>, {
       headers: {
         "Content-Type": "application/zip",

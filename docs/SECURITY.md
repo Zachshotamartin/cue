@@ -4,7 +4,7 @@ The account-based release is being implemented. See PRODUCTION_PLAN.md and VERIF
 
 ## Accounts and authorization
 
-Neon managed authentication validates sessions. Protected pages redirect to sign-in; every API also validates the session and resolves the project owner before reading or writing its assets, jobs, revisions, captures or keys. Visiting a URL no longer creates an account or issues an installation-wide credential. Server-side mutation origin checks are independent of UI redirects. Verified email is required for provider keys and billable operations.
+Supabase managed authentication validates sessions. Protected pages redirect to sign-in; every API also validates the session and resolves the project owner before reading or writing its assets, jobs, revisions, captures or keys. Visiting a URL no longer creates an account or issues an installation-wide credential. Server-side mutation origin checks are independent of UI redirects. Verified email is required for provider keys and billable operations.
 
 ## Provider credentials
 
@@ -28,4 +28,4 @@ The initial service limits accounts to 100 projects, 1 GiB of media, three activ
 
 Keep production and development databases/stores separate. Do not put production secrets in preview branches or Git. Vercel deployment protection does not replace application authentication. Do not log full requests to the key endpoints, provider bodies, signed media URLs or callback tokens. The local SQLite adapter is explicitly opt-in outside tests and cannot be used on Vercel as durable storage.
 
-Account export is available through project ZIP/MP4/SRT downloads. Archive is reversible; media retention is intentional. The original local .data directory is preserved by the import script. Database restore retention depends on the actual Neon plan and must be verified in its console; a free plan is not an independent backup strategy.
+Account export is available through project ZIP/MP4/SRT downloads. Archive is reversible; media retention is intentional. The original local .data directory is preserved by the import script. Database restore retention depends on the actual Supabase plan and must be verified in its console; a free plan is not an independent backup strategy.

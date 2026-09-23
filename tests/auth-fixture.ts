@@ -13,12 +13,7 @@ const account = vi.hoisted(() => ({
   },
 }));
 vi.mock("../apps/editor/lib/auth-server", () => ({
-  getAuth: () => ({
-    getSession: async () => ({
-      data: account.user ? { user: account.user } : null,
-      error: null,
-    }),
-  }),
+  currentUser: async () => account.user,
 }));
 
 export { account };

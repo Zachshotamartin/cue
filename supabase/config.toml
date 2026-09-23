@@ -1,0 +1,35 @@
+# Cue cloud authentication configuration. Provider credentials stay in Supabase.
+project_id = "cue"
+
+[auth]
+enabled = true
+site_url = "https://cue-tau-green.vercel.app"
+additional_redirect_urls = ["https://cue-tau-green.vercel.app/auth/callback", "https://cue-tau-green.vercel.app/auth/callback?next=/auth/reset-password", "http://127.0.0.1:5303/auth/callback", "http://127.0.0.1:5303/auth/callback?next=/auth/reset-password"]
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+refresh_token_reuse_interval = 10
+enable_signup = true
+enable_anonymous_sign_ins = false
+enable_manual_linking = false
+minimum_password_length = 12
+password_requirements = ""
+
+[auth.email]
+enable_signup = true
+double_confirm_changes = true
+enable_confirmations = true
+secure_password_change = true
+max_frequency = "1m0s"
+otp_length = 8
+otp_expiry = 3600
+
+# [auth.email.template.confirmation]
+# subject = "Confirm your Cue account"
+# content_path = "./supabase/templates/confirmation.html"
+
+# [auth.email.template.recovery]
+# subject = "Reset your Cue password"
+# content_path = "./supabase/templates/recovery.html"
+
+[db.ssl_enforcement]
+enabled = true

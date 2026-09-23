@@ -2,7 +2,7 @@ import { randomBytes, createHash } from "node:crypto";
 import { db, project, tx } from "./db";
 import { rateLimit } from "./client";
 import { origin } from "./config";
-import { getAuth } from "../../apps/editor/lib/auth-server";
+import { currentUser } from "../../apps/editor/lib/auth-server";
 export class HttpError extends Error {
   constructor(
     public status: number,
@@ -24,15 +24,14 @@ export function assertHost(req: Request) {
     throw new HttpError(403, "Request host is not allowed.");
 }
 export async function sessionUser() {
-  if (!process.env.NEON_AUTH_BASE_URL && process.env.NODE_ENV !== "test")
+  if (!process.env.SUPABASE_URL && process.env.NODE_ENV !== "test")
     throw new HttpError(
       503,
       "Account setup is awaiting the database connection. No local access bypass is enabled.",
     );
-  const result = await getAuth().getSession();
-  if (result.error || !result.data?.user)
-    throw new HttpError(401, "Sign in to your Cue account.");
-  return result.data.user;
+  const user = await currentUser();
+  if (!user) throw new HttpError(401, "Sign in to your Cue account.");
+  return user;
 }
 export async function assertOwner(req: Request, verified = false) {
   assertHost(req);

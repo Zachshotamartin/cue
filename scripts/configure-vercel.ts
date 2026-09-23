@@ -7,7 +7,6 @@ if (!["production", "preview"].includes(target))
 for (const key of [
   "CUE_MASTER_KEY",
   "CUE_SIGNING_SECRET",
-  "NEON_AUTH_COOKIE_SECRET",
   "CRON_SECRET",
   "BLOB_READ_WRITE_TOKEN",
 ]) {

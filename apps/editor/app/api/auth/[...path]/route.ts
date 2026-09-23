@@ -1,28 +1,183 @@
-import { getAuth } from "../../../../lib/auth-server";
+import { z } from "zod";
+import { getAuth, currentUser } from "../../../../lib/auth-server";
+import { assertHost, HttpError } from "../../../../../../packages/storage/auth";
+import { rateLimit } from "../../../../../../packages/storage/client";
+import { createHash } from "node:crypto";
+import {
+  boundedText,
+  RequestTooLarge,
+} from "../../../../../../packages/server/request-body";
 export const dynamic = "force-dynamic";
-export async function GET(req: Request, ctx: any) {
-  if (!process.env.NEON_AUTH_BASE_URL)
-    return Response.json(
-      {
-        error: {
-          message:
-            "Account setup is not complete yet. The operator must connect Neon authentication.",
-        },
-      },
-      { status: 503 },
+const json = (body: unknown, status = 200) =>
+  Response.json(body, {
+    status,
+    headers: { "Cache-Control": "private, no-store" },
+  });
+const email = z.string().email().max(254);
+const password = z.string().min(12).max(128);
+export async function GET(
+  req: Request,
+  ctx: { params: Promise<{ path: string[] }> },
+) {
+  try {
+    assertHost(req);
+    if ((await ctx.params).path.join("/") !== "session")
+      return json({ error: { message: "Not found." } }, 404);
+    if (!process.env.SUPABASE_URL)
+      return json(
+        { error: { message: "Supabase account setup is not complete yet." } },
+        503,
+      );
+    const user = await currentUser();
+    return json({ data: user ? { user } : null });
+  } catch (e) {
+    if (e instanceof HttpError)
+      return json({ error: { message: e.message } }, e.status);
+    return json(
+      { error: { message: "Account service is temporarily unavailable." } },
+      503,
     );
-  return getAuth().handler().GET(req, ctx);
+  }
 }
-export async function POST(req: Request, ctx: any) {
-  if (!process.env.NEON_AUTH_BASE_URL)
-    return Response.json(
+export async function POST(
+  req: Request,
+  ctx: { params: Promise<{ path: string[] }> },
+) {
+  try {
+    assertHost(req);
+    if (req.headers.get("origin") !== new URL(req.url).origin)
+      return json(
+        { error: { message: "Request origin is not allowed." } },
+        403,
+      );
+    if (!process.env.SUPABASE_URL)
+      return json(
+        { error: { message: "Supabase account setup is not complete yet." } },
+        503,
+      );
+    const action = (await ctx.params).path.join("/");
+    if (
+      ![
+        "sign-up",
+        "sign-in",
+        "sign-out",
+        "forgot-password",
+        "reset-password",
+        "verify-email",
+        "revoke-others",
+      ].includes(action)
+    )
+      return json({ error: { message: "Not found." } }, 404);
+    const ip = createHash("sha256")
+      .update(req.headers.get("x-forwarded-for")?.split(",")[0] || "local")
+      .digest("hex");
+    const scarce = ["sign-up", "forgot-password", "verify-email"].includes(
+      action,
+    );
+    if (
+      !(await rateLimit(
+        `auth:${action}:${ip}`,
+        scarce ? 8 : 30,
+        scarce ? 3600000 : 300000,
+      ))
+    )
+      return json(
+        {
+          error: {
+            message: "Too many attempts. Please wait before trying again.",
+          },
+        },
+        429,
+      );
+    const text = await boundedText(req, 4096);
+    const body = JSON.parse(text || "{}");
+    const auth = (await getAuth()).auth;
+    const callback = new URL("/auth/callback", req.url);
+    let result;
+    switch (action) {
+      case "sign-up": {
+        const b = z
+          .object({ email, password, name: z.string().trim().min(1).max(100) })
+          .parse(body);
+        result = await auth.signUp({
+          email: b.email,
+          password: b.password,
+          options: { data: { name: b.name }, emailRedirectTo: callback.href },
+        });
+        break;
+      }
+      case "sign-in": {
+        const b = z
+          .object({ email, password: z.string().min(1).max(128) })
+          .parse(body);
+        result = await auth.signInWithPassword(b);
+        break;
+      }
+      case "forgot-password": {
+        callback.searchParams.set("next", "/auth/reset-password");
+        result = await auth.resetPasswordForEmail(email.parse(body.email), {
+          redirectTo: callback.href,
+        });
+        break;
+      }
+      case "verify-email": {
+        result = await auth.resend({
+          type: "signup",
+          email: email.parse(body.email),
+          options: { emailRedirectTo: callback.href },
+        });
+        break;
+      }
+      case "reset-password": {
+        if (!(await currentUser()))
+          return json(
+            {
+              error: {
+                message:
+                  "Your reset link expired. Request a new link from the sign-in page.",
+              },
+            },
+            401,
+          );
+        result = await auth.updateUser({
+          password: password.parse(body.newPassword),
+        });
+        if (!result.error) await auth.signOut();
+        break;
+      }
+      case "sign-out":
+        result = await auth.signOut({ scope: "local" });
+        break;
+      case "revoke-others":
+        result = await auth.signOut({ scope: "others" });
+        break;
+    }
+    if (result?.error)
+      return json({ error: { message: result.error.message } }, 400);
+    // Tokens and refresh tokens never leave the server in JSON.
+    return json({ data: { ok: true } });
+  } catch (e) {
+    if (e instanceof HttpError)
+      return json({ error: { message: e.message } }, e.status);
+    if (e instanceof RequestTooLarge)
+      return json({ error: { message: "Request too large." } }, 413);
+    if (e instanceof z.ZodError || e instanceof SyntaxError)
+      return json(
+        {
+          error: {
+            message: "Check your email, name, and password and try again.",
+          },
+        },
+        400,
+      );
+    return json(
       {
         error: {
           message:
-            "Account setup is not complete yet. The operator must connect Neon authentication.",
+            "Account service is temporarily unavailable. Please try again.",
         },
       },
-      { status: 503 },
+      503,
     );
-  return getAuth().handler().POST(req, ctx);
+  }
 }

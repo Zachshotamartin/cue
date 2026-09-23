@@ -27,4 +27,4 @@ Gemini produces a reviewable description and evidence-linked storyboard in one b
 
 ## Boundaries for the hosted version
 
-The production implementation uses Neon managed authentication and PostgreSQL, private Vercel Blob storage, Vercel Workflow orchestration and Sandbox rendering. Server routes enforce project ownership for every asset/job operation. The old installation-wide loopback cookie is removed. AES-GCM provider credentials are scoped to the signed-in user, with no shared owner-key fallback. See PRODUCTION_PLAN.md for the full account, persistence, recovery and operational contract.
+The production implementation uses Supabase managed authentication and PostgreSQL, private Vercel Blob storage, Vercel Workflow orchestration and Sandbox rendering. Server routes enforce project ownership for every asset/job operation. The old installation-wide loopback cookie is removed. AES-GCM provider credentials are scoped to the signed-in user, with no shared owner-key fallback. See PRODUCTION_PLAN.md for the full account, persistence, recovery and operational contract.

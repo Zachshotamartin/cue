@@ -7,7 +7,11 @@ export function AccountForm({ mode }: { mode: string }) {
   const router = useRouter(),
     params = useSearchParams();
   const [busy, setBusy] = useState(false),
-    [message, setMessage] = useState("");
+    [message, setMessage] = useState(
+      params.get("error") === "expired-link"
+        ? "That link expired or was already used. Request a new verification or reset email."
+        : "",
+    );
   const titles: Record<string, string> = {
     "sign-in": "Welcome back.",
     "sign-up": "Your own creative space.",
@@ -48,10 +52,7 @@ export function AccountForm({ mode }: { mode: string }) {
         return;
       }
       if (mode === "reset-password") {
-        const token = params.get("token");
-        if (!token)
-          throw new Error("Open the reset link from your email first.");
-        r = await authClient.resetPassword({ newPassword: password, token });
+        r = await authClient.resetPassword({ newPassword: password });
         if (r.error) throw new Error(r.error.message);
         router.push("/auth/sign-in");
         return;

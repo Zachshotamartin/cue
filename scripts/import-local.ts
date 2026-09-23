@@ -3,6 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { Pool } from "pg";
+import { postgresConfiguration } from "../packages/storage/postgres";
 import { initializeDatabase, db, tx } from "../packages/storage/client";
 import { writeObject } from "../packages/storage/objects";
 import { root } from "../packages/storage/config";
@@ -12,9 +13,9 @@ if (!process.env.DATABASE_URL || !email)
   throw new Error(
     "Usage: npm run import:local -- VERIFIED_ACCOUNT_EMAIL [local-data-directory]. Configure the target database first.",
   );
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const pool = new Pool(postgresConfiguration());
 const { rows } = await pool.query(
-  'SELECT id,email,"emailVerified" FROM neon_auth."user" WHERE lower(email)=lower($1)',
+  'SELECT id,email,email_confirmed_at AS "emailVerified" FROM auth.users WHERE lower(email)=lower($1)',
   [email],
 );
 await pool.end();

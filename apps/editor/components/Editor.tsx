@@ -43,6 +43,13 @@ import { Logo } from "./Logo";
 import { useModalFocus } from "./useModalFocus";
 
 type InspectorTab = "scene" | "generate" | "audio" | "brand" | "export";
+function clearRecovery(key: string) {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    /* Cloud saves remain authoritative when browser storage is unavailable. */
+  }
+}
 export function Editor({ id }: { id: string }) {
   const router = useRouter();
   const [snap, setSnap] = useState<Snapshot | null>(null),
@@ -141,7 +148,7 @@ export function Editor({ id }: { id: string }) {
             JSON.stringify(r.draft) !== JSON.stringify(data.project.draft)
           )
             setRecovery(r);
-          else localStorage.removeItem(recoveryKey());
+          else clearRecovery(recoveryKey());
         }
       } catch {}
     }
@@ -231,7 +238,7 @@ export function Editor({ id }: { id: string }) {
           if (draftRef.current === value) {
             dirtyRef.current = false;
             setDirty(false);
-            localStorage.removeItem(recoveryKey());
+            clearRecovery(recoveryKey());
             setSaveState("Saved to your account");
           } else preserve(draftRef.current!);
         } catch (e: any) {
@@ -279,7 +286,7 @@ export function Editor({ id }: { id: string }) {
       draftRef.current = latest.project.draft;
       dirtyRef.current = false;
       setDirty(false);
-      localStorage.removeItem(recoveryKey());
+      clearRecovery(recoveryKey());
       setSaveState("Saved to your account");
     }
   }

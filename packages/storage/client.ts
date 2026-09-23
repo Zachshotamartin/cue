@@ -3,12 +3,13 @@ import { Pool, type PoolClient } from "pg";
 import path from "node:path";
 import fs from "node:fs";
 import { dataDir } from "./config";
+import { postgresConfiguration } from "./postgres";
 
 const context = new AsyncLocalStorage<PoolClient | "sqlite">();
 export const cloudDatabase = !!process.env.DATABASE_URL;
 const pool = cloudDatabase
   ? new Pool({
-      connectionString: process.env.DATABASE_URL,
+      ...postgresConfiguration(),
       max: 4,
       idleTimeoutMillis: 10000,
       connectionTimeoutMillis: 10000,
@@ -25,11 +26,28 @@ const columns = [
   "expiresAt",
   "archivedAt",
 ];
+const privateTables = [
+  "projects",
+  "revisions",
+  "assets",
+  "jobs",
+  "takes",
+  "events",
+  "credentials",
+  "pairing",
+  "capture_tokens",
+  "uploads",
+  "upload_chunks",
+  "project_archive",
+  "request_limits",
+  "schema_migrations",
+];
 function postgresSQL(sql: string) {
   let i = 0;
   return sql
     .replace(/\?/g, () => `$${++i}`)
-    .replace(new RegExp(`\\b(${columns.join("|")})\\b`, "g"), '"$1"');
+    .replace(new RegExp(`\\b(${columns.join("|")})\\b`, "g"), '"$1"')
+    .replace(new RegExp(`\\b(${privateTables.join("|")})\\b`, "g"), 'cue."$1"');
 }
 const schema = `
 CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY, owner TEXT NOT NULL, revision INTEGER NOT NULL, draft TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL);
@@ -60,9 +78,19 @@ export async function initializeDatabase() {
         try {
           await c.query("BEGIN");
           await c.query("SELECT pg_advisory_xact_lock(735619284)");
-          await c.query(postgresSQL(schema));
+          // Cue uses server-owned SQL transactions. Keep its tables out of the
+          // Supabase public Data API rather than exposing encrypted credentials
+          // or trusting a browser-supplied owner ID.
           await c.query(
-            "INSERT INTO schema_migrations VALUES(1,$1) ON CONFLICT DO NOTHING",
+            "CREATE SCHEMA IF NOT EXISTS cue; REVOKE ALL ON SCHEMA cue FROM PUBLIC",
+          );
+          await c.query(postgresSQL(schema));
+          for (const table of privateTables)
+            await c.query(
+              `ALTER TABLE cue."${table}" ENABLE ROW LEVEL SECURITY`,
+            );
+          await c.query(
+            "INSERT INTO cue.schema_migrations VALUES(1,$1) ON CONFLICT DO NOTHING",
             [new Date().toISOString()],
           );
           await c.query("COMMIT");

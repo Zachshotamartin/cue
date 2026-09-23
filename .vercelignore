@@ -1,0 +1,17 @@
+.env
+.env.*
+!.env.example
+.data/
+.test-data/
+.agents/
+.swc/
+.next/
+**/.next/
+node_modules/
+.git/
+test-results/
+playwright-report/
+*.tsbuildinfo
+skills-lock.json
+scripts/capture-test-site.ts
+supabase/.temp/

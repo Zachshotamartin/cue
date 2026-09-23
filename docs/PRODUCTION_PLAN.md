@@ -10,8 +10,8 @@ Cue is an account-based application for turning a captured website into an edita
 
 - Public source repository: Zachshotamartin/cue. Commit implementation milestones and keep credentials, recordings, local databases and deployment tokens out of Git.
 - Vercel project: cue, Zach team, verified account zachsm@alumni.stanford.edu. Deploy manually; no reliance on GitHub Actions minutes.
-- Neon Postgres: durable relational data, transactions, ownership and optimistic revision checks. Migrations are versioned, repeatable, and serialized. No production SQLite or local disk database.
-- Neon managed authentication: verified account sessions, sign-in/sign-up, email verification and recovery. Never grant an account by visiting a page. Authenticate server-side on every protected request; proxy redirects are convenience only.
+- Supabase Postgres: durable relational data, transactions, ownership and optimistic revision checks. Migrations are versioned, repeatable, and serialized. No production SQLite or local disk database.
+- Supabase Auth: verified account sessions, sign-in/sign-up, email verification and recovery. Never grant an account by visiting a page. Authenticate server-side on every protected request; proxy redirects are convenience only.
 - Private Vercel Blob: immutable assets, upload chunks, generated outputs and export artifacts. Access through ownership-checked endpoints or expiring, purpose-scoped capabilities. Blob URLs are never authorization.
 - Vercel Workflow: durable orchestration independent of a browser or laptop. Vercel Sandbox: bounded FFmpeg/Chromium rendering and media processing. Job records remain the user-visible source of truth and preserve ambiguous provider submissions for reconciliation.
 - Production, preview and local environments must not silently share production credentials or mutable test data. A missing production dependency fails closed.
@@ -19,7 +19,7 @@ Cue is an account-based application for turning a captured website into an edita
 ## Authentication and authorization
 
 1. Provide branded sign-in, create-account, verification, forgot-password and reset-password flows. Preserve a validated relative return path.
-2. Use managed auth session validation; cookies use the SDK's secure HTTP-only same-site configuration. Require verified email before key storage or billable work.
+2. Use Supabase Auth getUser validation on protected requests; refresh cookies through the Next.js proxy. Auth API responses never return access/refresh tokens. Cookies are HTTP-only and same-site. Require verified email before key storage or billable work.
 3. Every project lookup requires the authenticated user ID. Asset, upload, revision, job, export, pairing and event access resolves through its project owner. Never accept owner IDs from client input.
 4. Server-only worker operations resolve the owner from the persisted job. Provider keys never fall back to the application owner's environment keys for another user.
 5. Sign-out clears account-scoped local recovery data. Account settings include session revocation. No passwords, raw provider keys or tokens in logs or responses.
@@ -68,7 +68,7 @@ Generate distinct high-entropy application/session/capability/encryption secrets
 
 - Free/included infrastructure to start; no automatic billing-plan upgrades. Provider generation is user-funded through their own keys and explicit estimates/limits.
 - Per-account storage, upload, project and active-job caps; request throttling on auth-adjacent, pairing, uploads and generation endpoints. Do not expose an anonymous render endpoint.
-- Health endpoint reveals dependency readiness without secrets. Structured job IDs support diagnosis. Database backups/restore and object retention must be documented honestly for the selected plan.
+- Health endpoint reveals dependency readiness without secrets. Structured job IDs support diagnosis. Database backups/restore and object retention must be documented honestly for the selected plan. Public email signup requires a configured SMTP provider; Supabase’s default mail service only serves organization members.
 - No destructive migration or deletion of the original .data directory. Import existing local projects to the verified owner's account through an explicit migration script, preserving IDs, revisions, asset hashes and paid-job state. Do not rerun existing paid jobs during import.
 
 ## Implementation milestones

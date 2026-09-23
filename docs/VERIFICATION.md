@@ -1,10 +1,20 @@
 # Production upgrade verification — September 23, 2026
 
-Current implementation: 40 automated checks pass (account isolation, verified-key requirements, persistence/revisions, concurrent saves and claims, spending/idempotency, credential encryption, upload integrity, provider HTTP contracts, job recovery and recording storage). These use an isolated database adapter and mocked managed-auth sessions; they are not a claim of a live Neon authentication test.
+The application now uses Supabase Auth and PostgreSQL, private Vercel Blob assets, and account-owned encrypted provider credentials. The public source repository is https://github.com/Zachshotamartin/cue. Vercel is configured for manual deployment.
 
-A separate PostgreSQL 14 instance also passed the real SQL migration, concurrent revision, ownership, budget/idempotency, exclusive claim, rate-limit and snapshot checks. The provisioned private Vercel Blob store passed authenticated write/read; anonymous reads returned 403. The synthetic object was removed after verification. TypeScript and the optimized Next.js + Workflow build pass. Production dependency audit: zero known vulnerabilities after pinning patched transitive packages. Vercel project and private Blob store have been created. Encryption, session-signing, worker-signing, cron and Blob secrets are configured as sensitive production env values.
+## Verified for the current implementation
 
-**Outstanding external gate:** Vercel requires the account holder to accept Neon's marketplace terms before the database and managed authentication can be provisioned. Consequently live sign-up/email delivery, cross-browser cloud persistence, local-project import, deployed Workflow/Sandbox rendering and real paid provider execution have not yet been verified. Runway/Gemini/ElevenLabs keys are supplied by each user after sign-in. The Chrome authenticated capture test is postponed at the user's request.
+- TypeScript, the optimized Next.js/Workflow build, and **51 automated checks** pass. Auth checks cover CSRF, password validation, email callback redirects, token-free JSON, recovery authentication, throttling and bounded request bodies. Existing checks cover tenant isolation, revisions, uploads, encryption and provider-job recovery.
+- A real Supabase database passed migrations, owner isolation, concurrent revision conflicts, job idempotency/budget reservations, exclusive claims, rate limits and saved snapshots. Synthetic verification rows were cleaned up. Database TLS verifies the provider CA and hostname; SSL is enforced server-side.
+- Cue tables live in the private cue schema with RLS enabled and no public grants. Anonymous Supabase Data API access to that schema was rejected with PGRST106.
+- The private Vercel Blob store passed authenticated write/read and rejected anonymous reads. Production dependency audit reported zero known vulnerabilities after the Supabase migration.
+- Vercel upload inputs were audited. Environment files, local databases, test data and provisioning credentials are excluded explicitly by .vercelignore.
+
+## Remaining release verification
+
+Live application authentication, deployed Workflow/Sandbox rendering and cross-browser persistence still require the first staged deployment check. Public signup and password recovery require custom SMTP: Supabase's default sender only serves organization members. Custom confirmation/recovery templates are prepared but cannot be enabled on the free plan until SMTP is configured. Default same-browser PKCE callbacks remain supported.
+
+Real Runway/Gemini/ElevenLabs generation is not certified without user-supplied keys and a live test. The authenticated Chrome capture test remains postponed at the user's request. Original local projects are preserved and can be imported after their owner creates a verified Cue account.
 
 The historical evidence below is from the original local prototype and does not certify the account-based cloud release.
 
