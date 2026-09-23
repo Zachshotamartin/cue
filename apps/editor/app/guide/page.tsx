@@ -76,9 +76,9 @@ export default function Guide() {
           <h2>Export the final cut</h2>
           <p>
             Choose landscape, portrait or square, review the framing, and export
-            an MP4. Rendering runs locally in a separate worker. Closing the
-            editor does not discard accepted jobs. The export panel also offers
-            scene captions, a poster and a project archive.
+            an MP4. Rendering runs in the cloud, independently of your browser.
+            Closing the editor does not discard accepted jobs. The export panel
+            also offers scene captions, a poster and a project archive.
           </p>
         </section>
         <section id="privacy">

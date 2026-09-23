@@ -4,7 +4,7 @@
 
 ## Mark
 
-A thick open right-angle frame in ink with one short orange timing bar. The lowercase wordmark keeps the tool approachable. Use the vector mark for application icons and the CSS mark for responsive navigation. Maintain clear space equal to the thickness of the bracket on every side. Do not add gradients, a play triangle or decorative waveforms.
+A thick open right-angle frame in ink with one short orange timing bar. The lowercase wordmark keeps the tool approachable. Use the shared `cue-logo.svg` for every wordmark. It contains the offset bracket and orange bar with outlined Manrope lettering, so its proportions do not depend on fonts loading. `Logo.tsx` references the wordmark or compact mark from that asset; the capture-extension build copies the same file. The app icon uses the bracket on chalk. Never recreate the logo with CSS or live text. Maintain clear space equal to the thickness of the bracket on every side. Do not add gradients, a play triangle or decorative waveforms.
 
 ## Palette
 
@@ -15,7 +15,7 @@ A thick open right-angle frame in ink with one short orange timing bar. The lowe
 | Stone         | `#B9BBB4` |
 | Signal orange | `#DF603C` |
 
-Orange marks selected states, motion and emphasis. Use darker burnt orange for small text on chalk. Primary buttons are ink on chalk; the editor keeps the film as the strongest visual object.
+Orange marks selected states, motion and emphasis. Use darker burnt orange for small text on chalk. Public pages use chalk with charcoal type and ink buttons. The landing hero, sign-in brand panel, and editing workspace use charcoal with chalk type and orange primary actions. Use neutral surfaces, thin borders, and restrained 4px corners. The film remains the strongest visual object in the editor.
 
 ## Typography and voice
 
@@ -32,6 +32,11 @@ The board is a concept presentation. The interface shown by the running app is r
 - `apps/editor/public/brand/cue-brand-kit.png`: generated identity board.
 - `apps/editor/public/brand/frames.png`: generated material hero.
 - `apps/editor/public/brand/cue-icon.svg`: geometric vector implementation of the mark.
-- `apps/editor/components/Logo.tsx`: live mark and wordmark.
-- `apps/editor/app/globals.css`: implemented tokens and layouts.
+- `apps/editor/public/brand/cue-logo.svg`: shared vector wordmark and compact mark.
+- `apps/editor/components/Logo.tsx`: the only React logo component.
+- `apps/editor/styles/tokens.css`: canonical palette and light/dark semantic roles.
+- `apps/editor/styles/base.css`: shared controls, typography and dialogs.
+- `apps/editor/styles/pages.css`: public, account and library layouts.
+- `apps/editor/styles/editor.css`: editing workspace and responsive panels.
+- `apps/editor/app/globals.css`: imports the four style layers in order.
 - `/brand`: view/download the board and vector from the running app.

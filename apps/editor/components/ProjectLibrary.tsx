@@ -5,6 +5,8 @@ import { useEffect, useState } from "react";
 import type { Project } from "../../../packages/contracts";
 import { api } from "./client-api";
 import { Button } from "./ui/Button";
+import { CreateFilmDialog } from "./CreateFilmDialog";
+import { ProjectCard } from "./ProjectCard";
 export function ProjectLibrary() {
   const router = useRouter();
   const [showArchived, setShowArchived] = useState(false);
@@ -48,8 +50,8 @@ export function ProjectLibrary() {
       <div className="page-heading">
         <div>
           <p className="eyebrow">Your studio</p>
-          <h1>Good things in the making.</h1>
-          <p>Pick up a film, or give something new its first cue.</p>
+          <h1>Your films. In the making.</h1>
+          <p>Real screens, a little direction, a story of your own.</p>
         </div>
         <Button className="button" onClick={() => setCreating(true)}>
           <Plus size={18} /> New film
@@ -132,7 +134,3 @@ export function ProjectLibrary() {
     </main>
   );
 }
-
-import { CreateFilmDialog } from "./CreateFilmDialog";
-
-import { ProjectCard } from "./ProjectCard";

@@ -24,7 +24,7 @@ export function Editor({ id }: { id: string }) {
   if (!state.draft || !state.snap) return <EditorLoading error={state.error} />;
   return (
     <EditorContext value={state}>
-      <div className="editor-shell">
+      <div className="editor-shell theme-dark">
         <EditorHeader />
         {(conflict || recovery) && <RecoveryBanner />}
 

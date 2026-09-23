@@ -1,10 +1,12 @@
 export function Logo({ compact = false }: { compact?: boolean }) {
   return (
-    <span className="wordmark" aria-label="Cue">
-      <span className="cue-mark" aria-hidden="true">
-        <i />
-      </span>
-      {!compact && <span>cue</span>}
-    </span>
+    <svg
+      className={`wordmark${compact ? " is-compact" : ""}`}
+      viewBox={compact ? "0 0 211 114" : "0 0 389 180"}
+      role="img"
+      aria-label="Cue"
+    >
+      <use href={`/brand/cue-logo.svg#${compact ? "mark" : "wordmark"}`} />
+    </svg>
   );
 }

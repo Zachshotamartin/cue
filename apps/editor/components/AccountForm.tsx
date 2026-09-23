@@ -5,6 +5,7 @@ import { useState } from "react";
 import { authClient } from "../lib/auth-client";
 import { Button } from "./ui/Button";
 import { Input } from "./ui/Input";
+import { Logo } from "./Logo";
 export function AccountForm({ mode }: { mode: string }) {
   const router = useRouter(),
     params = useSearchParams();
@@ -84,8 +85,8 @@ export function AccountForm({ mode }: { mode: string }) {
   }
   return (
     <main className="auth-layout page-shell">
-      <div className="auth-intro">
-        <p className="eyebrow">Cue · Your studio</p>
+      <div className="auth-intro theme-dark">
+        <Logo />
         <h1>{titles[mode] || titles["sign-in"]}</h1>
         <p>
           Your projects, captures and finished films stay with your account.

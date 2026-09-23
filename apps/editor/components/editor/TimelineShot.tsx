@@ -14,8 +14,9 @@ export function TimelineShot({ s, i }: { s: Shot; i: number }) {
     <Button
       key={s.id}
       className={`timeline-shot ${shot?.id === s.id ? "selected" : ""}`}
+      aria-label={`Select scene ${i + 1}: ${s.title}`}
+      aria-pressed={shot?.id === s.id}
       onClick={() => choose(s)}
-      style={{ flexGrow: s.duration }}
     >
       <div>
         {a?.kind === "image" ? (

@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { AccountSettings } from "./AccountSettings";
+import { ProviderConnection, type ProviderStatus } from "./ProviderConnection";
 import { api } from "./client-api";
 const providers = [
   {
@@ -41,9 +42,20 @@ export function Settings() {
     [message, setMessage] = useState(""),
     [busy, setBusy] = useState("");
   useEffect(() => {
+    let active = true;
     api("/settings")
-      .then((x) => setStatus(x.providers))
-      .catch((e) => setMessage(e.message));
+      .then((x) => {
+        if (active) {
+          setStatus(x.providers);
+          setMessage("");
+        }
+      })
+      .catch((e) => {
+        if (active) setMessage(e.message);
+      });
+    return () => {
+      active = false;
+    };
   }, []);
   async function save(provider: string, form: FormData) {
     setBusy(provider);
@@ -83,7 +95,6 @@ export function Settings() {
         Connect only what you need. Capturing, editing and exports work without
         an AI key.
       </p>
-      <AccountSettings />
       {message && (
         <p className="notice" role="status">
           {message}
@@ -109,8 +120,7 @@ export function Settings() {
           Provider requests are sent only when you choose an AI operation.
         </p>
       </aside>
+      <AccountSettings />
     </main>
   );
 }
-
-import { ProviderConnection, type ProviderStatus } from "./ProviderConnection";
