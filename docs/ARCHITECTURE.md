@@ -9,7 +9,7 @@
 - `packages/director`: bounded, deduplicated evidence selection; starter treatments; planner schema and evidence validation.
 - `packages/storage`: SQLite WAL transactions, asset validation, encryption and auth.
 - `packages/compositor`: the same React scene components power the player and final exports.
-- `packages/providers`: explicit Runway, Gemini and ElevenLabs wire contracts. HTTP errors are sanitized. Credentials are server-only.
+- `packages/providers`: explicit Runway, OpenAI Responses, Anthropic Messages, Gemini and ElevenLabs wire contracts. HTTP errors are sanitized. Credentials are server-only.
 
 ## State and failure handling
 
@@ -23,8 +23,12 @@ Render jobs freeze the saved draft. They use owned assets with narrow signatures
 
 The application uses one package manifest and lockfile with clear package directories rather than publishing workspace packages prematurely. The side panel uses small native modules, without a second React build. Only SiteDNA's readiness evaluator is vendored; route/capture/video logic is Cue code with pinned upstream provenance.
 
-Gemini produces a reviewable description and evidence-linked storyboard in one bounded structured call. Three deterministic treatments provide cheap editable animatics without purchasing three films. A user can exclude private or irrelevant captures before planning.
+The selected OpenAI, Claude or Gemini planner produces a reviewable description and evidence-linked storyboard in one bounded structured call. Three deterministic treatments provide cheap editable animatics without purchasing three films. A user can exclude private or irrelevant captures before planning.
 
 ## Boundaries for the hosted version
 
 The production implementation uses Supabase managed authentication and PostgreSQL, private Vercel Blob storage, Vercel Workflow orchestration and Sandbox rendering. Server routes enforce project ownership for every asset/job operation. The old installation-wide loopback cookie is removed. AES-GCM provider credentials are scoped to the signed-in user, with no shared owner-key fallback. See PRODUCTION_PLAN.md for the full account, persistence, recovery and operational contract.
+
+## Storyboard providers
+
+OpenAI uses the [Responses API structured-output contract](https://developers.openai.com/api/docs/guides/structured-outputs) with inline image evidence and store:false. Claude uses [Messages structured outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs). Both receive up to six resized source images and the same brief/evidence prompt as Gemini. Claude’s unsupported numeric and array bounds are described in the schema and validated locally. Refusals, truncated output and malformed plans do not replace the timeline or trigger another paid request. Provider/model identity is recorded when the job is queued.

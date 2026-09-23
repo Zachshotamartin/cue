@@ -4,11 +4,13 @@ The application now uses Supabase Auth and PostgreSQL, private Vercel Blob asset
 
 ## Verified for the current implementation
 
-- TypeScript, the optimized Next.js/Workflow build, and **54 automated checks** pass. Auth checks cover CSRF, password validation, email callback redirects, token-free JSON, recovery authentication, throttling and bounded request bodies. Existing checks cover tenant isolation, revisions, uploads, encryption and provider-job recovery.
+- TypeScript, the optimized Next.js/Workflow build, and **68 automated checks** pass. Auth checks cover CSRF, password validation, email callback redirects, token-free JSON, recovery authentication, throttling and bounded request bodies. Existing checks cover tenant isolation, revisions, uploads, encryption and provider-job recovery.
 - A real Supabase database passed migrations, owner isolation, concurrent revision conflicts, job idempotency/budget reservations, exclusive claims, rate limits and saved snapshots. Synthetic verification rows were cleaned up. Database TLS verifies the provider CA and hostname; SSL is enforced server-side.
 - Cue tables live in the private cue schema with RLS enabled and no public grants. Anonymous Supabase Data API access to that schema was rejected with PGRST106.
 - The private Vercel Blob store passed authenticated write/read and rejected anonymous reads. Production dependency audit reported zero known vulnerabilities after the Supabase migration.
 - Vercel upload inputs were audited. Environment files, local databases, test data and provisioning credentials are excluded explicitly by .vercelignore.
+
+The OpenAI/Claude planner addition passed mocked wire-contract tests, provider-specific encrypted key isolation, saved per-film selection, queue routing, legacy Gemini compatibility and refusal/truncation handling. These tests do not certify real paid provider responses.
 
 ## Verified on the deployed application
 
@@ -24,7 +26,7 @@ The application now uses Supabase Auth and PostgreSQL, private Vercel Blob asset
 
 Public signup and password recovery require custom SMTP: Supabase's default sender only serves organization members. Custom confirmation/recovery templates are prepared but cannot be enabled on the free plan until SMTP is configured. Default same-browser PKCE callbacks remain supported.
 
-Real Runway/Gemini/ElevenLabs generation is not certified without user-supplied keys and a live test. The authenticated Chrome capture test remains postponed at the user's request. Original local projects are preserved and have been imported into the verified owner account.
+Real Runway/OpenAI/Claude/Gemini/ElevenLabs generation is not certified without user-supplied keys and a live test. The authenticated Chrome capture test remains postponed at the user's request. Original local projects are preserved and have been imported into the verified owner account.
 
 The historical evidence below is from the original local prototype and does not certify the account-based cloud release.
 

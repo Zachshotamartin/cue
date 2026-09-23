@@ -141,6 +141,7 @@ export function inferredPalette(assets: Asset[]) {
 }
 export const planJsonSchema = {
   type: "object",
+  additionalProperties: false,
   required: ["description", "shots"],
   properties: {
     description: { type: "string" },
@@ -150,6 +151,7 @@ export const planJsonSchema = {
       maxItems: 7,
       items: {
         type: "object",
+        additionalProperties: false,
         required: [
           "title",
           "assetId",

@@ -17,6 +17,20 @@ const providers = [
     url: "https://aistudio.google.com/apikey",
   },
   {
+    id: "openai",
+    name: "OpenAI (ChatGPT)",
+    description:
+      "Storyboard planning from your screens and brief. Uses an OpenAI API key, billed separately from ChatGPT.",
+    url: "https://platform.openai.com/api-keys",
+  },
+  {
+    id: "anthropic",
+    name: "Claude",
+    description:
+      "Storyboard planning from your screens and brief. Uses an Anthropic API key, billed separately from a Claude subscription.",
+    url: "https://platform.claude.com/settings/keys",
+  },
+  {
     id: "elevenlabs",
     name: "ElevenLabs",
     description: "Optional voice-over from your narration script.",

@@ -1,10 +1,12 @@
 import crypto from "node:crypto";
 import { db, now } from "./db";
 import { localSecret } from "./config";
-import type { Provider } from "../contracts";
+import { providerSchema, type Provider } from "../contracts";
 const envKeys: Record<Provider, string> = {
   runway: "RUNWAYML_API_SECRET",
   gemini: "GEMINI_API_KEY",
+  openai: "OPENAI_API_KEY",
+  anthropic: "ANTHROPIC_API_KEY",
   elevenlabs: "ELEVENLABS_API_KEY",
 };
 function master() {
@@ -89,7 +91,7 @@ export async function credential(owner: string, provider: Provider) {
 }
 export async function credentialStatus(owner = "local") {
   return Promise.all(
-    (["runway", "gemini", "elevenlabs"] as Provider[]).map(async (provider) => {
+    providerSchema.options.map(async (provider) => {
       const row: any = await db
         .prepare(
           "SELECT suffix,updatedAt FROM credentials WHERE owner=? AND provider=?",
@@ -98,7 +100,10 @@ export async function credentialStatus(owner = "local") {
       return {
         provider,
         configured:
-          !!row || (owner === "local" && !!process.env[envKeys[provider]]),
+          !!row ||
+          (process.env.CUE_ALLOW_LOCAL_PROVIDER_KEYS === "1" &&
+            owner === "local" &&
+            !!process.env[envKeys[provider]]),
         suffix: row?.suffix || null,
         source: row
           ? "encrypted"

@@ -17,7 +17,7 @@ const provider = vi.hoisted(() => ({
   pollVideo: vi.fn(),
   cancelVideo: vi.fn(),
   downloadOutput: vi.fn(),
-  planWithGemini: vi.fn(),
+  planStoryboard: vi.fn(),
   synthesize: vi.fn(),
 }));
 vi.mock("../packages/providers", async (importOriginal) => ({
@@ -133,7 +133,7 @@ describe("durable provider jobs", () => {
         reservedCents: 0,
       }),
     );
-    expect(provider.planWithGemini).not.toHaveBeenCalled();
+    expect(provider.planStoryboard).not.toHaveBeenCalled();
     expect((await getJob(j.id)).state).toBe("completed");
   });
   it("retries output retrieval against the same task ID", async () => {
@@ -158,5 +158,87 @@ describe("durable provider jobs", () => {
     expect(saved.payload.retries).toBe(1);
     expect(saved.state).toBe("running");
     expect(provider.submitVideo).not.toHaveBeenCalled();
+  });
+  it.each(["openai", "anthropic"])(
+    "routes a queued %s plan without changing the live timeline",
+    async (planner) => {
+      vi.clearAllMocks();
+      const p = await createProject("Selected planner");
+      const a = await importMedia(
+        p.id,
+        await sharp({
+          create: { width: 20, height: 20, channels: 3, background: "red" },
+        })
+          .png()
+          .toBuffer(),
+        "source.png",
+      );
+      const j = await enqueue(
+        p.id,
+        "plan",
+        { draft: p.draft, provider: planner, model: "pinned-model" },
+        crypto.randomUUID(),
+        25,
+      );
+      provider.planStoryboard.mockResolvedValueOnce({
+        description: "A proposal",
+        shots: Array.from({ length: 4 }, () => ({
+          title: "Scene",
+          assetId: a.id,
+          evidenceIds: [a.id],
+          purpose: "Show product",
+          template: "showcase",
+          mode: "exact-ui",
+          duration: 5,
+          caption: "A real screen",
+          narration: "",
+          prompt: "",
+          motion: "push",
+        })),
+      });
+      await runJob(j);
+      const saved = await getJob(j.id);
+      expect(provider.planStoryboard).toHaveBeenCalledWith(
+        "local",
+        expect.any(String),
+        [a],
+        planner,
+        "pinned-model",
+      );
+      expect(saved.state).toBe("completed");
+      expect(saved.payload.provider).toBe(planner);
+      expect(saved.payload.result.shots).toHaveLength(4);
+      expect(saved.chargedCents).toBe(25);
+      expect(saved.reservedCents).toBe(0);
+      expect(
+        (await db.prepare("SELECT revision FROM projects WHERE id=?").get(p.id))
+          .revision,
+      ).toBe(1);
+    },
+  );
+  it("accounts for a confirmed planner refusal and does not retry it", async () => {
+    vi.clearAllMocks();
+    const p = await createProject("Refused plan");
+    const j = await enqueue(
+      p.id,
+      "plan",
+      { draft: p.draft, provider: "anthropic" },
+      crypto.randomUUID(),
+      25,
+    );
+    provider.planStoryboard.mockRejectedValueOnce(
+      new ProviderError(
+        "Claude could not complete the storyboard. Your film is unchanged.",
+        true,
+        true,
+      ),
+    );
+    await runJob(j);
+    const saved = await getJob(j.id);
+    expect(saved.state).toBe("failed");
+    expect(saved.chargedCents).toBe(25);
+    expect(saved.reservedCents).toBe(0);
+    expect(provider.planStoryboard).toHaveBeenCalledTimes(1);
+    expect(saved.payload.result).toBeUndefined();
   });
 });

@@ -1,7 +1,31 @@
 import { z } from "zod";
 
 export const formatSchema = z.enum(["landscape", "portrait", "square"]);
-export const providerSchema = z.enum(["runway", "gemini", "elevenlabs"]);
+export const providerSchema = z.enum([
+  "runway",
+  "gemini",
+  "openai",
+  "anthropic",
+  "elevenlabs",
+]);
+export const plannerProviderSchema = z.enum(["gemini", "openai", "anthropic"]);
+export type PlannerProvider = z.infer<typeof plannerProviderSchema>;
+export const planners = {
+  gemini: { label: "Gemini", model: "gemini-2.5-flash", reserveCents: 25 },
+  openai: {
+    label: "OpenAI (ChatGPT)",
+    model: "gpt-5.4-mini",
+    reserveCents: 25,
+  },
+  anthropic: { label: "Claude", model: "claude-sonnet-4-6", reserveCents: 25 },
+} satisfies Record<
+  PlannerProvider,
+  { label: string; model: string; reserveCents: number }
+>;
+export function plannerLabel(value: unknown) {
+  const parsed = plannerProviderSchema.safeParse(value);
+  return planners[parsed.success ? parsed.data : "gemini"].label;
+}
 export const rectSchema = z
   .object({
     x: z.number().min(0).max(1),
@@ -63,6 +87,7 @@ export const draftSchema = z.object({
   cta: z.string().max(120),
   format: formatSchema,
   treatment: z.enum(["editorial", "energetic", "minimal"]),
+  plannerProvider: plannerProviderSchema.default("gemini"),
   excludedAssetIds: z.array(z.string()).max(300).default([]),
   brand: brandSchema,
   shots: z.array(shotSchema).max(30),
@@ -180,6 +205,7 @@ export function defaultDraft(title: string, siteUrl = ""): Draft {
     cta: siteUrl ? new URL(siteUrl).hostname : "See what you can make.",
     format: "landscape",
     treatment: "editorial",
+    plannerProvider: "gemini",
     excludedAssetIds: [],
     brand: {
       accent: "#df603c",

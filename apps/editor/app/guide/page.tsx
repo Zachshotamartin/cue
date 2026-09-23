@@ -37,10 +37,10 @@ export default function Guide() {
         <section>
           <h2>Shape the story</h2>
           <p>
-            Build a starter storyboard from your captures, or connect Gemini in
-            Settings for an AI-directed proposal. Write the audience, product
-            description and call to action first. A proposal is reviewed before
-            it replaces your timeline.
+            Build a starter storyboard from your captures, or connect OpenAI,
+            Claude or Gemini in Settings and choose your planner in Brief. Write
+            the audience, product description and call to action first. A
+            proposal is reviewed before it replaces your timeline.
           </p>
           <p>
             Select a scene to change its title, caption, length, movement or

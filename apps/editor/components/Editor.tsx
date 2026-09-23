@@ -33,6 +33,9 @@ import {
   dimensions,
   durationFrames,
   shotSchema,
+  planners,
+  plannerProviderSchema,
+  plannerLabel,
   type Draft,
   type Shot,
   type Snapshot,
@@ -425,6 +428,7 @@ export function Editor({ id }: { id: string }) {
   const selectedTakes = snap?.takes.filter((t) => t.shotId === shot?.id) || [];
   const connected = (p: string) =>
     providers.some((x) => x.provider === p && x.configured);
+  const selectedPlanner = draft?.plannerProvider || "gemini";
   const total = draft?.shots.reduce((n, s) => n + s.duration, 0) || 0;
   if (!draft || !snap)
     return (
@@ -863,9 +867,9 @@ export function Editor({ id }: { id: string }) {
                 onClick={() => {
                   setTab("brand");
                   setNotice(
-                    connected("gemini")
+                    connected(selectedPlanner)
                       ? "Set your brief, then ask the director for a proposal."
-                      : "Connect Gemini in Settings to use AI direction.",
+                      : "Choose OpenAI, Claude or Gemini in Brief, then connect its API key in Settings.",
                   );
                 }}
               >
@@ -1723,30 +1727,58 @@ export function Editor({ id }: { id: string }) {
                 </button>
                 <div className="inspector-divider" />
                 <h3>Ask the director.</h3>
+                <label>
+                  Storyboard planner
+                  <select
+                    value={selectedPlanner}
+                    onChange={(e) =>
+                      mutate((d) => {
+                        d.plannerProvider = plannerProviderSchema.parse(
+                          e.target.value,
+                        );
+                      })
+                    }
+                  >
+                    {plannerProviderSchema.options.map((provider) => (
+                      <option key={provider} value={provider}>
+                        {planners[provider].label}
+                        {connected(provider)
+                          ? " · Connected"
+                          : " · Add API key"}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <p className="field-help">
-                  Gemini reads your selected screens and brief. Review its
-                  proposal before applying it. Reserve: $0.25.
+                  {plannerLabel(selectedPlanner)} receives your included screens
+                  and brief only when you request a proposal. Review it before
+                  applying. Budget reservation:{" "}
+                  {money(planners[selectedPlanner].reserveCents)}; provider
+                  billing applies.
                 </p>
-                {!connected("gemini") && (
+                {!connected(selectedPlanner) && (
                   <Link
                     className="connection-note"
                     href="/settings"
                     onClick={(e) => leave(e, "/settings")}
                   >
-                    Connect Gemini ↗
+                    Connect {plannerLabel(selectedPlanner)} ↗
                   </Link>
                 )}
                 <button
                   className="button wide"
                   disabled={
-                    !connected("gemini") || !sceneAssets.length || !!busy
+                    !connected(selectedPlanner) || !sceneAssets.length || !!busy
                   }
                   onClick={() =>
                     action("plan", async () => {
                       const revision = await savedRevision();
                       await api(
                         `/projects/${id}/plan`,
-                        jobOptions({ revision }),
+                        jobOptions({
+                          revision,
+                          provider: selectedPlanner,
+                        }),
                       );
                       setNotice("The director is preparing a proposal.");
                     })
@@ -1761,7 +1793,8 @@ export function Editor({ id }: { id: string }) {
                     className="proposal-link"
                     onClick={() => setShowProposal(j.id)}
                   >
-                    Review {j.payload.result.shots.length}-scene proposal{" "}
+                    {plannerLabel(j.payload.provider)} · Review{" "}
+                    {j.payload.result.shots.length}-scene proposal{" "}
                     <ArrowUpRight size={16} />
                   </button>
                 ))}
@@ -2059,6 +2092,12 @@ export function Editor({ id }: { id: string }) {
               <X size={20} />
             </button>
             <h2>A proposed direction.</h2>
+            <p className="eyebrow">
+              {plannerLabel(
+                proposals.find((j) => j.id === showProposal)?.payload.provider,
+              )}{" "}
+              proposal
+            </p>
             <p>
               Check every product claim against the source screens. Review these
               scenes before replacing your timeline. Your current version stays

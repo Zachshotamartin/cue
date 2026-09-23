@@ -10,7 +10,7 @@
 - Exact UI animations, generated clips and hybrid scenes; generated takes never overwrite sources.
 - A Chrome extension for explicitly reviewed screenshot routes and interaction recordings, including authenticated sites without exporting login cookies.
 - Account-based project library, revisions, autosave, conflict recovery, private media and encrypted user-supplied provider keys.
-- Runway video generation, Gemini storyboarding, ElevenLabs narration. These features require each user's own provider keys and credits.
+- Runway video generation; OpenAI, Claude or Gemini storyboarding; ElevenLabs narration. These features require each user's own provider keys and credits.
 - PostgreSQL job records, Vercel Workflow orchestration and bounded Sandbox rendering independent of an open browser.
 
 ## Production infrastructure
@@ -49,8 +49,12 @@ The importer verifies ownership, preserves project/asset IDs and revision histor
 ## Provider keys
 
 - [Runway developer portal](https://dev.runwayml.com/): create a developer API key and fund that account.
+- [OpenAI API keys](https://platform.openai.com/api-keys): add an API key with model access and API billing. A ChatGPT subscription is separate.
+- [Anthropic API keys](https://platform.claude.com/settings/keys): add a Claude API key with API credits. A Claude subscription is separate.
 - [Google AI Studio](https://aistudio.google.com/apikey): create a Gemini key with access to the configured model.
 - [ElevenLabs API keys](https://elevenlabs.io/app/settings/api-keys): create a key with text-to-speech access.
+
+Choose the storyboard provider in the film’s Brief panel. Cue saves this choice per film and records the provider and model on each proposal; applying a proposal is always a separate step. The initial planner models are GPT-5.4 mini, Claude Sonnet 4.6 and Gemini 2.5 Flash. Operators can set OPENAI_PLANNER_MODEL, ANTHROPIC_PLANNER_MODEL or GEMINI_MODEL for new jobs; queued jobs keep their recorded model.
 
 Keys are encrypted at rest per account and used only for explicit jobs. Cue can capture and edit without AI keys. It does not currently generate music or sound effects; upload an audio track for the soundtrack.
 

@@ -62,7 +62,7 @@ Cue is an account-based application for turning a captured website into an edita
 
 ## Keys and environment setup
 
-Generate distinct high-entropy application/session/capability/encryption secrets and configure them with Vercel CLI as sensitive environment values. Database and private Blob credentials stay server-side. Store user-supplied Runway, Gemini and ElevenLabs keys encrypted in Postgres, not in plaintext env files or localStorage. Key settings expose only configured status and the last four characters, with replace/delete controls. Application infrastructure secrets are separate from users' provider keys. Document rotation and recovery; losing the encryption key makes stored provider keys unreadable.
+Generate distinct high-entropy application/session/capability/encryption secrets and configure them with Vercel CLI as sensitive environment values. Database and private Blob credentials stay server-side. Store user-supplied Runway, OpenAI, Anthropic, Gemini and ElevenLabs keys encrypted in Postgres, not in plaintext env files or localStorage. Key settings expose only configured status and the last four characters, with replace/delete controls. Application infrastructure secrets are separate from users' provider keys. Document rotation and recovery; losing the encryption key makes stored provider keys unreadable.
 
 ## Operational boundaries
 

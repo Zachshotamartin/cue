@@ -31,6 +31,8 @@ import {
   draftSchema,
   editSchema,
   providerSchema,
+  plannerProviderSchema,
+  planners,
   type Asset,
 } from "../contracts";
 import { validAssetSignature, dataDir, origin, root } from "../storage/config";
@@ -57,7 +59,11 @@ import {
   putCredential,
   removeCredential,
 } from "../storage/credentials";
-import { starterStoryboard, inferredPalette } from "../director";
+import {
+  starterStoryboard,
+  inferredPalette,
+  evidenceAssets,
+} from "../director";
 import { rateLimit, cloudDatabase, lockAccount } from "../storage/client";
 import {
   writeObject,
@@ -67,7 +73,7 @@ import {
   cloudObjects,
 } from "../storage/objects";
 import { dispatchJob } from "../cloud/dispatch";
-import { videoPrice } from "../providers";
+import { videoPrice, plannerModel } from "../providers";
 
 const json = (x: unknown, status = 200) =>
   Response.json(x, { status, headers: { "Cache-Control": "no-store" } });
@@ -532,20 +538,31 @@ async function dispatch(req: Request, p: string[]): Promise<Response> {
   )
     await assertOwner(req, true);
   if (p[2] === "plan" && method === "POST") {
-    await credential(owner, "gemini");
-    const b = z.object({ revision: z.number().int() }).parse(await body(req));
+    const b = z
+      .object({
+        revision: z.number().int(),
+        provider: plannerProviderSchema.optional(),
+      })
+      .parse(await body(req));
+    const provider = b.provider || current.draft.plannerProvider;
+    await credential(owner, provider);
     if (b.revision !== current.revision)
       throw new HttpError(409, "Revision conflict.");
-    if (!(await assets(id)).length)
+    if (!evidenceAssets(current.draft, await assets(id)).length)
       throw new HttpError(400, "Capture a screen first.");
     return json(
       {
         job: await queue(
           id,
           "plan",
-          { draft: current.draft, revision: b.revision },
+          {
+            draft: { ...current.draft, plannerProvider: provider },
+            revision: b.revision,
+            provider,
+            model: plannerModel(provider),
+          },
           idempotency(req),
-          25,
+          planners[provider].reserveCents,
         ),
       },
       202,

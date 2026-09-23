@@ -20,7 +20,7 @@ import {
 import {
   cancelVideo,
   downloadOutput,
-  planWithGemini,
+  planStoryboard,
   pollVideo,
   ProviderError,
   submitVideo,
@@ -139,12 +139,23 @@ export async function runJob(start: Job) {
         job.payload.draft,
         await assets(job.projectId),
       );
-      const result = await planWithGemini(
+      const result = await planStoryboard(
         owner,
         storyboardPrompt(job.payload.draft, captured),
         captured,
+        job.payload.provider || "gemini",
+        job.payload.model,
       );
-      const proposed = applyPlan(job.payload.draft, captured, result);
+      let proposed;
+      try {
+        proposed = applyPlan(job.payload.draft, captured, result);
+      } catch {
+        throw new ProviderError(
+          "The planner returned an invalid proposal. Your film is unchanged.",
+          true,
+          true,
+        );
+      }
       job = await updateJob(job, {
         state: "running",
         payload: { ...job.payload, result: proposed },
@@ -222,6 +233,10 @@ export async function runJob(start: Job) {
           ? "The provider submission could not be confirmed. Check the provider dashboard before creating another request."
           : String(e.message || "The job failed.").slice(0, 500),
         reservedCents: uncertain ? fresh.reservedCents : 0,
+        chargedCents:
+          e instanceof ProviderError && e.billable
+            ? fresh.chargedCents + fresh.reservedCents
+            : fresh.chargedCents,
         leaseUntil: 0,
       });
   } finally {
