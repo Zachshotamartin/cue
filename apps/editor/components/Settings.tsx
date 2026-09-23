@@ -1,6 +1,5 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Check, Key, ArrowUpRight } from "@phosphor-icons/react";
 import { AccountSettings } from "./AccountSettings";
 import { api } from "./client-api";
 const providers = [
@@ -38,7 +37,7 @@ const providers = [
   },
 ];
 export function Settings() {
-  const [status, setStatus] = useState<any[]>([]),
+  const [status, setStatus] = useState<ProviderStatus[]>([]),
     [message, setMessage] = useState(""),
     [busy, setBusy] = useState("");
   useEffect(() => {
@@ -91,58 +90,16 @@ export function Settings() {
         </p>
       )}
       <div className="provider-list">
-        {providers.map((p) => {
-          const s = status.find((x) => x.provider === p.id);
-          return (
-            <section key={p.id} className="provider-row">
-              <div className="provider-heading">
-                <Key size={25} />
-                <div>
-                  <h2>{p.name}</h2>
-                  <p>{p.description}</p>
-                  <a href={p.url} target="_blank" rel="noreferrer">
-                    Get an API key <ArrowUpRight size={14} />
-                  </a>
-                </div>
-                {s?.configured && (
-                  <span className="connected">
-                    <Check size={14} />
-                    Connected
-                    {s.suffix ? ` ••••${s.suffix}` : " via environment"}
-                  </span>
-                )}
-              </div>
-              <form action={(form) => save(p.id, form)}>
-                <label htmlFor={`key-${p.id}`}>
-                  {s?.configured ? "Replace API key" : "API key"}
-                </label>
-                <div className="key-input">
-                  <input
-                    id={`key-${p.id}`}
-                    name="key"
-                    type="password"
-                    autoComplete="off"
-                    required
-                    minLength={12}
-                    placeholder="Paste your provider key"
-                  />
-                  <button className="button" disabled={busy === p.id}>
-                    {busy === p.id ? "Saving…" : "Save key"}
-                  </button>
-                  {s?.source === "encrypted" && (
-                    <button
-                      type="button"
-                      className="button secondary"
-                      onClick={() => remove(p.id)}
-                    >
-                      Remove
-                    </button>
-                  )}
-                </div>
-              </form>
-            </section>
-          );
-        })}
+        {providers.map((p) => (
+          <ProviderConnection
+            key={p.id}
+            p={p}
+            status={status}
+            busy={busy}
+            save={save}
+            remove={remove}
+          />
+        ))}
       </div>
       <aside className="privacy-note">
         <h3>Private by design.</h3>
@@ -155,3 +112,5 @@ export function Settings() {
     </main>
   );
 }
+
+import { ProviderConnection, type ProviderStatus } from "./ProviderConnection";

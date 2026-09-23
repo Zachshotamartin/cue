@@ -1,8 +1,10 @@
 "use client";
-import { useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useState } from "react";
 import { authClient } from "../lib/auth-client";
+import { Button } from "./ui/Button";
+import { Input } from "./ui/Input";
 export function AccountForm({ mode }: { mode: string }) {
   const router = useRouter(),
     params = useSearchParams();
@@ -107,13 +109,13 @@ export function AccountForm({ mode }: { mode: string }) {
           {mode === "sign-up" && (
             <label>
               Your name
-              <input name="name" autoComplete="name" required maxLength={100} />
+              <Input name="name" autoComplete="name" required maxLength={100} />
             </label>
           )}
           {mode !== "reset-password" && (
             <label>
               Email address
-              <input
+              <Input
                 name="email"
                 type="email"
                 autoComplete="email"
@@ -126,7 +128,7 @@ export function AccountForm({ mode }: { mode: string }) {
           {!["forgot-password", "verify-email"].includes(mode) && (
             <label>
               Password
-              <input
+              <Input
                 name="password"
                 type="password"
                 autoComplete={
@@ -141,7 +143,7 @@ export function AccountForm({ mode }: { mode: string }) {
               </small>
             </label>
           )}
-          <button className="button" disabled={busy}>
+          <Button type="submit" className="button" disabled={busy}>
             {busy
               ? "One moment…"
               : mode === "sign-up"
@@ -153,7 +155,7 @@ export function AccountForm({ mode }: { mode: string }) {
                     : mode === "verify-email"
                       ? "Resend verification email"
                       : "Sign in"}
-          </button>
+          </Button>
           {message && (
             <p role="status" className="notice">
               {message}

@@ -1,3 +1,5 @@
+import { RouteOption } from "./RouteOption.js";
+import { CapturePreview } from "./CapturePreview.js";
 import { getBlob } from "./shared.js";
 const $ = (id) => document.getElementById(id);
 let state = {},
@@ -31,18 +33,12 @@ async function refresh() {
   const routes = $("routes");
   routes.replaceChildren();
   for (const [i, r] of (state.routes || []).entries()) {
-    const label = document.createElement("label"),
-      checkbox = document.createElement("input"),
-      text = document.createElement("span");
-    checkbox.type = "checkbox";
-    checkbox.checked = r.selected;
-    text.textContent = `${r.label} ${r.state === "captured" ? "✓" : r.state === "failed" ? "(retry needed)" : ""}`;
-    checkbox.onchange = () => {
-      state.routes[i].selected = checkbox.checked;
-      command("ROUTES", { routes: state.routes });
-    };
-    label.append(checkbox, text);
-    routes.append(label);
+    routes.append(
+      RouteOption(r, (selected) => {
+        state.routes[i].selected = selected;
+        command("ROUTES", { routes: state.routes });
+      }),
+    );
   }
   const host = $("captures");
   host.replaceChildren();
@@ -51,33 +47,16 @@ async function refresh() {
   for (const c of state.captures || []) {
     const stored = await getBlob(c.id);
     if (!stored) continue;
-    const item = document.createElement("div");
-    item.className = "capture";
-    const preview = document.createElement(
-        c.kind === "video" ? "video" : "img",
-      ),
-      url = URL.createObjectURL(stored.blob);
+    const url = URL.createObjectURL(stored.blob);
     urls.push(url);
-    preview.src = url;
-    if (c.kind === "video") preview.controls = true;
-    else preview.alt = c.title;
-    const name = document.createElement("strong");
-    name.textContent = c.title;
-    const row = document.createElement("div");
-    row.className = "row";
-    const upload = document.createElement("button");
-    upload.textContent = c.uploaded ? "Added to project" : "Send to Cue";
-    upload.disabled = !!c.uploaded;
-    upload.onclick = () =>
-      action(upload, () => command("UPLOAD", { id: c.id }));
-    const remove = document.createElement("button");
-    remove.textContent = "Discard local copy";
-    remove.className = "quiet";
-    remove.onclick = () =>
-      action(remove, () => command("REMOVE", { id: c.id }));
-    row.append(upload, remove);
-    item.append(preview, name, row);
-    host.append(item);
+    host.append(
+      CapturePreview(
+        c,
+        url,
+        (button) => action(button, () => command("UPLOAD", { id: c.id })),
+        (button) => action(button, () => command("REMOVE", { id: c.id })),
+      ),
+    );
   }
 }
 for (const [id, type] of [
