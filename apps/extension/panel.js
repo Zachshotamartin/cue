@@ -87,10 +87,23 @@ for (const [id, type] of [
   ["mask", "MASK"],
 ])
   $(id).onclick = () => action($(id), () => command(type));
-$("pair-button").onclick = () =>
-  action($("pair-button"), () =>
-    command("PAIR", { server: $("server").value, code: $("code").value }),
-  );
+$("pair-button").onclick = async () => {
+  try {
+    const server = new URL($("server").value);
+    if (server.protocol === "https:") {
+      const allowed = await chrome.permissions.request({
+        origins: [`${server.origin}/*`],
+      });
+      if (!allowed)
+        throw new Error("Permission to connect to Cue was not granted.");
+    }
+    await action($("pair-button"), () =>
+      command("PAIR", { server: server.origin, code: $("code").value }),
+    );
+  } catch (e) {
+    $("message").textContent = e.message;
+  }
+};
 $("current").onclick = () =>
   action($("current"), () => command("CAPTURE", { label: $("label").value }));
 $("record").onclick = () =>

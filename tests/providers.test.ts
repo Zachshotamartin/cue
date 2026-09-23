@@ -16,12 +16,12 @@ import {
 } from "../packages/providers";
 afterEach(() => vi.unstubAllGlobals());
 afterAll(async () => {
-  db.close();
+  await db.close();
   await fs.rm(dataDir, { recursive: true, force: true });
 });
 describe("provider wire contracts (stubbed HTTP, no paid requests)", () => {
   it("sends the bounded reference, supported ratio, and reviewed generation options", async () => {
-    const p = createProject("Contract"),
+    const p = await createProject("Contract"),
       a = await importMedia(
         p.id,
         await sharp({
@@ -36,7 +36,7 @@ describe("provider wire contracts (stubbed HTTP, no paid requests)", () => {
           .toBuffer(),
         "source.png",
       );
-    putCredential("local", "runway", "test-runway-only");
+    await putCredential("local", "runway", "test-runway-only");
     const fetcher = vi
       .fn()
       .mockResolvedValue(Response.json({ id: "task-123" }));
@@ -86,7 +86,7 @@ describe("provider wire contracts (stubbed HTTP, no paid requests)", () => {
     expect(fetcher.mock.calls[0][1].redirect).toBe("error");
   });
   it("sends a structured planning contract and does not log provider bodies", async () => {
-    putCredential("local", "gemini", "test-gemini-only");
+    await putCredential("local", "gemini", "test-gemini-only");
     const fetcher = vi.fn().mockResolvedValue(
       Response.json({
         candidates: [
@@ -115,7 +115,7 @@ describe("provider wire contracts (stubbed HTTP, no paid requests)", () => {
     );
   });
   it("uses the configured speech voice and refuses malformed IDs before a request", async () => {
-    putCredential("local", "elevenlabs", "test-eleven-only");
+    await putCredential("local", "elevenlabs", "test-eleven-only");
     const fetcher = vi
       .fn()
       .mockResolvedValue(new Response(new Uint8Array([1, 2, 3])));

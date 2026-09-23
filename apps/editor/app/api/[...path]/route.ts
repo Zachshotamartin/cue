@@ -1,4 +1,5 @@
 import { handle } from "../../../../../packages/server/api";
+export const maxDuration = 300;
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 async function route(

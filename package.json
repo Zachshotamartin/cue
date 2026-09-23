@@ -8,9 +8,9 @@
   },
   "scripts": {
     "dev": "tsx scripts/dev.ts",
-    "dev:web": "next dev apps/editor --hostname 127.0.0.1 --port 5303",
+    "dev:web": "cd apps/editor && next dev --hostname 127.0.0.1 --port 5303",
     "worker": "tsx apps/worker/main.ts",
-    "build": "npm run extension:build && next build apps/editor",
+    "build": "npm run extension:build && npm run build:web",
     "start": "tsx scripts/start.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
@@ -19,28 +19,40 @@
     "seed": "tsx scripts/seed.ts",
     "check": "npm run typecheck && npm test && npm run build",
     "format": "prettier --write apps packages scripts tests docs *.json *.ts README.md",
-    "format:check": "prettier --check apps packages scripts tests docs *.json *.ts README.md"
+    "format:check": "prettier --check apps packages scripts tests docs *.json *.ts README.md",
+    "build:web": "cd apps/editor && next build",
+    "db:migrate": "tsx scripts/migrate.ts",
+    "import:local": "tsx scripts/import-local.ts",
+    "deploy:secrets": "tsx scripts/configure-vercel.ts"
   },
   "dependencies": {
     "@fontsource-variable/manrope": "5.3.0",
     "@fontsource/ibm-plex-mono": "5.3.0",
+    "@neondatabase/auth": "0.5.0-beta",
     "@phosphor-icons/react": "2.1.10",
     "@remotion/bundler": "4.0.527",
     "@remotion/player": "4.0.527",
     "@remotion/renderer": "4.0.527",
+    "@vercel/blob": "2.8.0",
+    "@vercel/sandbox": "3.3.0",
     "archiver": "8.0.0",
+    "ffmpeg-static": "5.3.0",
+    "ffprobe-static": "3.1.0",
     "motion": "13.4.1",
     "next": "16.3.6",
+    "pg": "8.23.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "remotion": "4.0.527",
     "sharp": "0.35.4",
+    "workflow": "4.8.9",
     "zod": "4.6.5"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",
     "@types/archiver": "8.0.0",
     "@types/node": "26.6.2",
+    "@types/pg": "8.23.1",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "fake-indexeddb": "6.2.5",
@@ -48,5 +60,16 @@
     "tsx": "4.23.15",
     "typescript": "5.9.3",
     "vitest": "5.0.1"
+  },
+  "overrides": {
+    "@workflow/world-local": {
+      "undici": "7.29.1"
+    },
+    "@workflow/world-vercel": {
+      "undici": "7.29.1"
+    },
+    "@workflow/core": {
+      "nanoid": "5.1.16"
+    }
   }
 }

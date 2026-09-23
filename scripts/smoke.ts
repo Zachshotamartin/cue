@@ -2,15 +2,14 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import {
-  origin,
-  root,
-  dataDir,
-  sessionSecret,
-} from "../packages/storage/config";
+import { origin, root, dataDir } from "../packages/storage/config";
 import { inspect, run } from "../packages/storage/media";
 import { shotSchema, type Asset } from "../packages/contracts";
-const headers = { authorization: `Bearer ${sessionSecret}`, origin };
+if (!process.env.CUE_TEST_SESSION_COOKIE)
+  throw new Error(
+    "Provide a dedicated test account session cookie through CUE_TEST_SESSION_COOKIE. No local admin bypass is available.",
+  );
+const headers = { cookie: process.env.CUE_TEST_SESSION_COOKIE, origin };
 async function api(route: string, method = "GET", body?: unknown) {
   const response: Response = await fetch(`${origin}/api/${route}`, {
     method,
@@ -41,7 +40,7 @@ async function upload(projectId: string, file: string) {
   return (await response.json()).asset;
 }
 const health = await api("health");
-assert.equal(health.mode, "private-local");
+assert.equal(health.mode, "account");
 const { project: p } = await api("projects", "POST", {
   title: "Cue render verification",
   siteUrl: origin,
@@ -159,7 +158,7 @@ const { stdout } = await run("unzip", ["-p", zip, "project.json"]);
 const manifest = JSON.parse(stdout);
 assert.equal(manifest.project.id, p.id);
 assert(Array.isArray(manifest.takes));
-assert(!stdout.includes(sessionSecret));
+assert(!stdout.includes(process.env.CUE_TEST_SESSION_COOKIE!));
 await fs.unlink(zip);
 console.log(
   JSON.stringify(

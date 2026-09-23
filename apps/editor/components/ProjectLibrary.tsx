@@ -14,8 +14,13 @@ import { useModalFocus } from "./useModalFocus";
 import type { Project } from "../../../packages/contracts";
 export function ProjectLibrary() {
   const router = useRouter();
+  const [showArchived, setShowArchived] = useState(false);
   const [projects, setProjects] = useState<
-      (Project & { thumbnail?: string; assetCount: number })[]
+      (Project & {
+        thumbnail?: string;
+        assetCount: number;
+        archived?: boolean;
+      })[]
     >([]),
     [loaded, setLoaded] = useState(false),
     [error, setError] = useState(""),
@@ -62,45 +67,88 @@ export function ProjectLibrary() {
           {error}
         </p>
       )}
+      <div className="library-filter">
+        <button
+          className="text-link"
+          aria-pressed={!showArchived}
+          onClick={() => setShowArchived(false)}
+        >
+          Recent films
+        </button>
+        <button
+          className="text-link"
+          aria-pressed={showArchived}
+          onClick={() => setShowArchived(true)}
+        >
+          Archived
+        </button>
+      </div>
       {!loaded ? (
         <div className="loading-layout" aria-label="Loading films">
           <div />
           <div />
           <div />
         </div>
-      ) : projects.length ? (
+      ) : projects.filter((p) => !!p.archived === showArchived).length ? (
         <div className="project-grid">
-          {projects.map((p) => (
-            <Link
-              className="project-card"
-              href={`/projects/${p.id}`}
-              key={p.id}
-            >
-              <div className="project-image">
-                {p.thumbnail ? (
-                  <img
-                    src={assetUrl(p.thumbnail)}
-                    alt={`${p.draft.title} source preview`}
-                  />
-                ) : (
-                  <div className="project-placeholder">
-                    <FilmStrip size={56} weight="thin" />
-                    <span>Your next opening frame.</span>
+          {projects
+            .filter((p) => !!p.archived === showArchived)
+            .map((p) => (
+              <article key={p.id}>
+                <Link
+                  className="project-card"
+                  href={`/projects/${p.id}`}
+                  key={p.id}
+                >
+                  <div className="project-image">
+                    {p.thumbnail ? (
+                      <img
+                        src={assetUrl(p.thumbnail)}
+                        alt={`${p.draft.title} source preview`}
+                      />
+                    ) : (
+                      <div className="project-placeholder">
+                        <FilmStrip size={56} weight="thin" />
+                        <span>Your next opening frame.</span>
+                      </div>
+                    )}
+                    <span className="project-arrow">
+                      <ArrowUpRight size={23} />
+                    </span>
                   </div>
-                )}
-                <span className="project-arrow">
-                  <ArrowUpRight size={23} />
-                </span>
-              </div>
-              <div className="project-info">
-                <h2>{p.draft.title}</h2>
-                <span>
-                  {p.draft.shots.length} scenes · {p.assetCount} assets
-                </span>
-              </div>
-              <p>{p.draft.siteUrl || "Independent film project"}</p>
-            </Link>
-          ))}
+                  <div className="project-info">
+                    <h2>{p.draft.title}</h2>
+                    <span>
+                      {p.draft.shots.length} scenes · {p.assetCount} assets
+                    </span>
+                  </div>
+                  <p>{p.draft.siteUrl || "Independent film project"}</p>
+                </Link>
+                <div className="project-actions">
+                  <span>{new Date(p.updatedAt).toLocaleDateString()}</span>
+                  <button
+                    className="text-link"
+                    onClick={async () => {
+                      try {
+                        await api(
+                          `/projects/${p.id}/${p.archived ? "unarchive" : "archive"}`,
+                          { method: "POST" },
+                        );
+                        setProjects((list) =>
+                          list.map((x) =>
+                            x.id === p.id ? { ...x, archived: !p.archived } : x,
+                          ),
+                        );
+                      } catch (e: any) {
+                        setError(e.message);
+                      }
+                    }}
+                  >
+                    {p.archived ? "Restore" : "Archive"}
+                  </button>
+                </div>
+              </article>
+            ))}
         </div>
       ) : (
         <div className="empty-library">

@@ -32,16 +32,16 @@ import type { Job } from "../../packages/contracts";
 
 export async function runJob(start: Job) {
   let job = start;
-  const heartbeat = setInterval(() => {
+  const heartbeat = setInterval(async () => {
     try {
-      job = updateJob(job, { leaseUntil: Date.now() + 60000 });
+      job = await updateJob(job, { leaseUntil: Date.now() + 60000 });
     } catch {}
   }, 20000);
   try {
-    const owner = project(job.projectId).owner;
+    const owner = (await project(job.projectId)).owner;
     if (job.cancelRequested) {
       if (job.providerTaskId) await cancelVideo(owner, job.providerTaskId);
-      updateJob(job, {
+      await updateJob(job, {
         state: "cancelled",
         reservedCents: 0,
         chargedCents: job.providerTaskId
@@ -53,16 +53,16 @@ export async function runJob(start: Job) {
     }
     if (job.kind === "generate") {
       if (!job.providerTaskId) {
-        job = updateJob(job, { state: "submitting", progress: 5 });
+        job = await updateJob(job, { state: "submitting", progress: 5 });
         const taskId = await submitVideo(
           owner,
-          getAsset(job.payload.sourceAssetId),
+          await getAsset(job.payload.sourceAssetId),
           job.payload.prompt,
           job.payload.model,
           job.payload.seconds,
           job.payload.format,
         );
-        job = updateJob(job, {
+        job = await updateJob(job, {
           state: "running",
           providerTaskId: taskId,
           chargedCents: job.reservedCents,
@@ -77,7 +77,7 @@ export async function runJob(start: Job) {
           true,
         );
       if (result.status !== "SUCCEEDED") {
-        updateJob(job, {
+        await updateJob(job, {
           state: "running",
           progress:
             typeof result.progress === "number"
@@ -91,7 +91,7 @@ export async function runJob(start: Job) {
         throw new ProviderError(
           "The completed task has no downloadable video.",
         );
-      job = updateJob(job, { state: "retrieving", progress: 90 });
+      job = await updateJob(job, { state: "retrieving", progress: 90 });
       const asset = await importMedia(
         job.projectId,
         await downloadOutput(result.output[0]),
@@ -107,7 +107,7 @@ export async function runJob(start: Job) {
           "The provider returned an invalid or incomplete video.",
           true,
         );
-      addTake({
+      await addTake({
         id: randomUUID(),
         projectId: job.projectId,
         shotId: job.payload.shotId,
@@ -118,7 +118,7 @@ export async function runJob(start: Job) {
         sourceHash: job.payload.sourceHash,
         createdAt: now(),
       });
-      updateJob(job, {
+      await updateJob(job, {
         state: "completed",
         error: null,
         progress: 100,
@@ -127,27 +127,38 @@ export async function runJob(start: Job) {
       });
     } else if (job.kind === "plan") {
       if (job.payload.result) {
-        updateJob(job, { state: "completed", progress: 100, leaseUntil: 0 });
+        await updateJob(job, {
+          state: "completed",
+          progress: 100,
+          leaseUntil: 0,
+        });
         return;
       }
-      job = updateJob(job, { state: "submitting", progress: 20 });
-      const captured = evidenceAssets(job.payload.draft, assets(job.projectId));
+      job = await updateJob(job, { state: "submitting", progress: 20 });
+      const captured = evidenceAssets(
+        job.payload.draft,
+        await assets(job.projectId),
+      );
       const result = await planWithGemini(
         owner,
         storyboardPrompt(job.payload.draft, captured),
         captured,
       );
       const proposed = applyPlan(job.payload.draft, captured, result);
-      job = updateJob(job, {
+      job = await updateJob(job, {
         state: "running",
         payload: { ...job.payload, result: proposed },
         chargedCents: job.reservedCents,
         reservedCents: 0,
       });
-      updateJob(job, { state: "completed", progress: 100, leaseUntil: 0 });
-      event(job.projectId, "plan.ready", { jobId: job.id });
+      await updateJob(job, {
+        state: "completed",
+        progress: 100,
+        leaseUntil: 0,
+      });
+      await event(job.projectId, "plan.ready", { jobId: job.id });
     } else if (job.kind === "narrate") {
-      job = updateJob(job, { state: "submitting", progress: 20 });
+      job = await updateJob(job, { state: "submitting", progress: 20 });
       const buffer = await synthesize(
         owner,
         job.payload.text,
@@ -159,7 +170,7 @@ export async function runJob(start: Job) {
         `${job.payload.shotTitle}-narration.mp3`,
         { state: "narration" },
       );
-      updateJob(job, {
+      await updateJob(job, {
         state: "completed",
         error: null,
         progress: 100,
@@ -169,9 +180,9 @@ export async function runJob(start: Job) {
         leaseUntil: 0,
       });
     } else {
-      job = updateJob(job, { state: "running", progress: 3 });
+      job = await updateJob(job, { state: "running", progress: 3 });
       const asset = await renderFilm(job);
-      updateJob(job, {
+      await updateJob(job, {
         state: "completed",
         error: null,
         progress: 100,
@@ -180,7 +191,7 @@ export async function runJob(start: Job) {
       });
     }
   } catch (e: any) {
-    const fresh = getJob(job.id);
+    const fresh = await getJob(job.id);
     const uncertain =
       fresh.state === "submitting" &&
       !(e instanceof ProviderError && e.definitive);
@@ -190,7 +201,7 @@ export async function runJob(start: Job) {
       !(e instanceof ProviderError && e.definitive) &&
       !fresh.cancelRequested;
     if (retryable && Number(fresh.payload.retries || 0) < 5)
-      updateJob(fresh, {
+      await updateJob(fresh, {
         state: "running",
         payload: {
           ...fresh.payload,
@@ -201,7 +212,7 @@ export async function runJob(start: Job) {
         leaseUntil: Date.now() + 30000,
       });
     else
-      updateJob(fresh, {
+      await updateJob(fresh, {
         state: fresh.cancelRequested
           ? "cancelled"
           : uncertain

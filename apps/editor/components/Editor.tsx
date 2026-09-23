@@ -94,12 +94,57 @@ export function Editor({ id }: { id: string }) {
       observedJobs.current.set(job.id, job.state);
     }
   }, [snap]);
+  const [saveState, setSaveState] = useState("Saved"),
+    [conflict, setConflict] = useState(false);
+  const [recovery, setRecovery] = useState<{
+    draft: Draft;
+    revision: number;
+  } | null>(null);
+  const baseRevision = useRef(0),
+    ownerRef = useRef(""),
+    saveFlight = useRef<Promise<any> | null>(null),
+    firstLoad = useRef(true);
+  const conflictRef = useRef(false);
+  const recoveryKey = () => `cue:recovery:${ownerRef.current}:${id}`;
+  function preserve(value: Draft, revision = baseRevision.current) {
+    if (!ownerRef.current) return;
+    try {
+      localStorage.setItem(
+        recoveryKey(),
+        JSON.stringify({ draft: value, revision, at: Date.now() }),
+      );
+    } catch {
+      setSaveState(
+        "Browser recovery unavailable — keep this tab open until saved",
+      );
+    }
+  }
   const draftRef = useRef<Draft | null>(null);
   draftRef.current = draft;
   const refresh = useCallback(async () => {
     const data = await api<Snapshot>(`/projects/${id}`);
+    ownerRef.current = data.project.owner;
     setSnap(data);
-    if (!dirtyRef.current) setDraft(data.project.draft);
+    if (!dirtyRef.current && !saveFlight.current) {
+      baseRevision.current = data.project.revision;
+      setDraft(data.project.draft);
+      draftRef.current = data.project.draft;
+    }
+    if (firstLoad.current) {
+      firstLoad.current = false;
+      try {
+        const raw = localStorage.getItem(recoveryKey());
+        if (raw) {
+          const r = JSON.parse(raw);
+          if (
+            r.draft &&
+            JSON.stringify(r.draft) !== JSON.stringify(data.project.draft)
+          )
+            setRecovery(r);
+          else localStorage.removeItem(recoveryKey());
+        }
+      } catch {}
+    }
   }, [id]);
   useEffect(() => {
     refresh().catch((e) => setError(e.message));
@@ -109,18 +154,16 @@ export function Editor({ id }: { id: string }) {
         setVoice(x.voiceId);
       })
       .catch(() => {});
-    const events = new EventSource(`/api/projects/${id}/events`);
-    let timer: ReturnType<typeof setTimeout>;
-    events.onmessage = () => {
-      clearTimeout(timer);
-      timer = setTimeout(
-        () => refresh().catch((e) => setError(e.message)),
-        250,
-      );
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") refresh().catch(() => {});
+    }, 4000);
+    const visible = () => {
+      if (document.visibilityState === "visible") refresh().catch(() => {});
     };
+    document.addEventListener("visibilitychange", visible);
     return () => {
-      events.close();
-      clearTimeout(timer);
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", visible);
     };
   }, [id, refresh]);
   useEffect(() => {
@@ -144,6 +187,8 @@ export function Editor({ id }: { id: string }) {
     setDraft(d);
     dirtyRef.current = true;
     setDirty(true);
+    setSaveState("Unsaved changes");
+    preserve(d);
   }
   function undo(redo = false) {
     const source = redo ? future.current : history.current,
@@ -155,25 +200,88 @@ export function Editor({ id }: { id: string }) {
     setDraft(d);
     dirtyRef.current = true;
     setDirty(true);
+    setSaveState("Unsaved changes");
+    preserve(d);
   }
-  async function save() {
-    if (!draftRef.current || !snap) return;
-    const value = draftRef.current;
-    const r = await api(`/projects/${id}/edits`, {
-      method: "POST",
-      body: JSON.stringify({
-        revision: snap.project.revision,
-        draft: value,
-        label: "Edit film",
-      }),
-    });
-    if (draftRef.current === value) {
+  async function save(): Promise<any> {
+    if (saveFlight.current) return saveFlight.current;
+    if (conflictRef.current)
+      throw new Error("Resolve the save conflict before continuing.");
+    if (!draftRef.current || !baseRevision.current) return;
+    const operation = (async () => {
+      let result: any;
+      while (dirtyRef.current) {
+        const value = draftRef.current!;
+        setSaveState("Saving…");
+        preserve(value);
+        try {
+          const r = await api(`/projects/${id}/edits`, {
+            method: "POST",
+            body: JSON.stringify({
+              revision: baseRevision.current,
+              draft: value,
+              label: "Edit film",
+            }),
+          });
+          result = r.project;
+          baseRevision.current = r.project.revision;
+          setSnap(
+            (previous) => previous && { ...previous, project: r.project },
+          );
+          if (draftRef.current === value) {
+            dirtyRef.current = false;
+            setDirty(false);
+            localStorage.removeItem(recoveryKey());
+            setSaveState("Saved to your account");
+          } else preserve(draftRef.current!);
+        } catch (e: any) {
+          if (e.status === 409) {
+            conflictRef.current = true;
+            setConflict(true);
+            setSaveState("Changes in another tab — resolve conflict");
+          } else setSaveState("Not saved — edits kept in this browser");
+          throw e;
+        }
+      }
+      return result || snap?.project;
+    })();
+    saveFlight.current = operation;
+    try {
+      return await operation;
+    } finally {
+      saveFlight.current = null;
+    }
+  }
+  useEffect(() => {
+    if (!dirty || conflict) return;
+    const timer = setTimeout(() => {
+      save().catch(() => {});
+    }, 900);
+    return () => clearTimeout(timer);
+  }, [draft, dirty, conflict]);
+  useEffect(() => {
+    const online = () => {
+      if (dirtyRef.current && !conflictRef.current) save().catch(() => {});
+    };
+    window.addEventListener("online", online);
+    return () => window.removeEventListener("online", online);
+  }, []);
+  async function resolveSave(keepEdits: boolean) {
+    const latest = await api<Snapshot>(`/projects/${id}`);
+    baseRevision.current = latest.project.revision;
+    setSnap(latest);
+    conflictRef.current = false;
+    setConflict(false);
+    if (keepEdits) {
+      await save();
+    } else {
+      setDraft(latest.project.draft);
+      draftRef.current = latest.project.draft;
       dirtyRef.current = false;
       setDirty(false);
+      localStorage.removeItem(recoveryKey());
+      setSaveState("Saved to your account");
     }
-    setSnap((s) => s && { ...s, project: r.project });
-    setNotice("Saved.");
-    return r.project;
   }
   async function action(name: string, fn: () => Promise<any>) {
     if (busy) return;
@@ -261,14 +369,30 @@ export function Editor({ id }: { id: string }) {
       for (const file of Array.from(files)) {
         if (file.size > 64 * 1024 * 1024)
           throw new Error(`${file.name} exceeds 64 MiB.`);
-        await api(`/projects/${id}/media`, {
+        const buffer = await file.arrayBuffer();
+        const digest = Array.from(
+          new Uint8Array(await crypto.subtle.digest("SHA-256", buffer)),
+        )
+          .map((x) => x.toString(16).padStart(2, "0"))
+          .join("");
+        const upload = await api(`/projects/${id}/uploads`, {
           method: "POST",
-          headers: {
-            "X-Cue-Name": encodeURIComponent(file.name),
-            "Content-Type": "application/octet-stream",
-          },
-          body: await file.arrayBuffer(),
+          body: JSON.stringify({
+            name: file.name,
+            bytes: file.size,
+            hash: digest,
+          }),
         });
+        for (let i = 0; i < upload.chunks; i++)
+          await api(`/uploads/${upload.id}/chunks/${i}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/octet-stream" },
+            body: buffer.slice(
+              i * 1048576,
+              Math.min(buffer.byteLength, (i + 1) * 1048576),
+            ),
+          });
+        await api(`/uploads/${upload.id}/complete`, { method: "POST" });
       }
       setLibrary("captures");
       setNotice("Media added to the capture library.");
@@ -329,9 +453,7 @@ export function Editor({ id }: { id: string }) {
               })
             }
           />
-          <span className="save-state">
-            {dirty ? "Unsaved changes" : "Saved locally"}
-          </span>
+          <span className="save-state">{saveState}</span>
         </div>
         <div className="editor-header-actions">
           <button
@@ -371,6 +493,46 @@ export function Editor({ id }: { id: string }) {
           </button>
         </div>
       </header>
+      {(conflict || recovery) && (
+        <section className="recovery-banner" role="status">
+          <p>
+            {conflict
+              ? "This project changed in another tab. Your edits are safe here. Choose which version to keep."
+              : "This browser has edits that did not finish saving. Restore them, or keep the cloud version."}
+          </p>
+          <button
+            className="button small"
+            onClick={() =>
+              action("recover", async () => {
+                if (recovery) {
+                  const latest = await api<Snapshot>(`/projects/${id}`);
+                  baseRevision.current = latest.project.revision;
+                  draftRef.current = recovery.draft;
+                  setDraft(recovery.draft);
+                  dirtyRef.current = true;
+                  setDirty(true);
+                  setRecovery(null);
+                  await save();
+                } else await resolveSave(true);
+              })
+            }
+          >
+            {recovery ? "Restore my edits" : "Keep my edits"}
+          </button>
+          <button
+            className="button small secondary"
+            onClick={() =>
+              action("recover", async () => {
+                setRecovery(null);
+                await resolveSave(false);
+              })
+            }
+          >
+            Use cloud version
+          </button>
+        </section>
+      )}
+
       {(error || notice) && (
         <div
           className={`editor-banner ${error ? "error" : ""}`}

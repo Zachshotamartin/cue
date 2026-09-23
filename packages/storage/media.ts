@@ -4,8 +4,12 @@ import { createHash, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import sharp from "sharp";
+import { lockAccount } from "./client";
 import { dataDir } from "./config";
-import { addAsset, assets, now, project } from "./db";
+import { writeObject, readObject, cloudObjects } from "./objects";
+import ffmpeg from "ffmpeg-static";
+import ffprobe from "ffprobe-static";
+import { addAsset, assets, now, project, projectStorage, tx } from "./db";
 import type { Asset, CaptureMetadata } from "../contracts";
 export const run = promisify(execFile);
 export const maxBytes = 64 * 1024 * 1024;
@@ -41,7 +45,7 @@ export async function readBounded(
 }
 export async function inspect(file: string) {
   const { stdout } = await run(
-    "ffprobe",
+    process.env.CUE_FFPROBE || ffprobe.path,
     [
       "-v",
       "error",
@@ -108,9 +112,10 @@ export async function importMedia(
   name: string,
   metadata: CaptureMetadata = {},
 ): Promise<Asset> {
-  project(projectId);
+  await project(projectId);
   if (!input.length || input.length > maxBytes)
     throw new Error("Files must be between 1 byte and 64 MiB.");
+  await fs.mkdir(dataDir, { recursive: true, mode: 0o700 });
   let buffer = input,
     ext = "",
     mime = "",
@@ -165,7 +170,7 @@ export async function importMedia(
         // Normalize them to seekable, widely playable H.264 before validation.
         if (text.slice(4, 8) !== "ftyp") {
           await run(
-            "ffmpeg",
+            process.env.CUE_FFMPEG || ffmpeg!,
             [
               "-v",
               "error",
@@ -237,34 +242,54 @@ export async function importMedia(
     throw new Error(
       "The normalized media exceeds 64 MiB. Use a shorter or smaller recording.",
     );
-  const digest = hash(buffer),
-    existing = assets(projectId).find(
-      (a) =>
-        a.hash === digest &&
-        a.name === name &&
-        JSON.stringify(a.metadata) === JSON.stringify(cleanMetadata(metadata)),
-    );
-  if (existing) return existing;
-  const id = randomUUID(),
-    relative = `${id}.${ext}`;
-  await fs.writeFile(path.join(dataDir, "assets", relative), buffer, {
-    flag: "wx",
+  const owner = (await project(projectId)).owner;
+  return tx(async () => {
+    await lockAccount(owner);
+    await project(projectId);
+    const digest = hash(buffer),
+      existing = (await assets(projectId)).find(
+        (a) =>
+          a.hash === digest &&
+          a.name === name &&
+          JSON.stringify(a.metadata) ===
+            JSON.stringify(cleanMetadata(metadata)),
+      );
+    if (existing) return existing;
+    if ((await projectStorage(owner)) + buffer.length > 1024 * 1048576)
+      throw new Error("Your account has reached its 1 GiB media limit.");
+    const id = randomUUID(),
+      relative = cloudObjects()
+        ? `projects/${projectId}/assets/${id}.${ext}`
+        : `${id}.${ext}`;
+    if (cloudObjects()) await writeObject(relative, buffer, mime);
+    else {
+      await fs.mkdir(path.join(dataDir, "assets"), { recursive: true });
+      await fs.writeFile(path.join(dataDir, "assets", relative), buffer, {
+        flag: "wx",
+      });
+    }
+    const asset: Asset = {
+      id,
+      projectId,
+      kind,
+      name: name.replace(/[\u0000-\u001f]/g, "").slice(0, 160),
+      mime,
+      bytes: buffer.length,
+      width,
+      height,
+      duration,
+      hash: digest,
+      path: relative,
+      metadata: cleanMetadata(metadata),
+      createdAt: now(),
+    };
+    await addAsset(asset);
+    return asset;
   });
-  const asset: Asset = {
-    id,
-    projectId,
-    kind,
-    name: name.replace(/[\u0000-\u001f]/g, "").slice(0, 160),
-    mime,
-    bytes: buffer.length,
-    width,
-    height,
-    duration,
-    hash: digest,
-    path: relative,
-    metadata: cleanMetadata(metadata),
-    createdAt: now(),
-  };
-  addAsset(asset);
-  return asset;
+}
+
+export async function readAsset(asset: Asset) {
+  return cloudObjects()
+    ? readObject(asset.path)
+    : fs.readFile(assetPath(asset));
 }

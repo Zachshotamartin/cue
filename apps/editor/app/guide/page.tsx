@@ -84,17 +84,16 @@ export default function Guide() {
         <section id="privacy">
           <h2>Your screens. Your keys.</h2>
           <p>
-            This installation runs privately on your computer. Screens and
-            recordings remain local until you explicitly request a provider
+            Your projects and media are saved privately to your account. AI
+            providers receive selected sources only when you request a provider
             operation. Your website login is never copied into Cue. Screenshot
             masks are applied before transfer; review recordings carefully
             because moving private data needs special care.
           </p>
           <p>
-            Provider keys saved in Settings are encrypted on disk. Each service
-            uses the key you configure. External users must bring their own keys
-            before any public hosted release; there is no shared-key public
-            service in this version.
+            Provider keys saved in Settings are encrypted for your account. Each
+            service uses your own key. Keys are never included in downloads or
+            sent to the capture extension.
           </p>
           <p>
             Generation costs are provider estimates, not an invoice. Cancelled

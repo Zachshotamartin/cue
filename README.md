@@ -1,77 +1,56 @@
 # Cue
 
-**Your product. In motion.** A private, local studio for turning real product screens and recordings into directed promotional films.
+**Your product. In motion.** Capture a website's real screens, direct a story, edit a film and export it. Cue is being upgraded from a local prototype to an account-based production application.
 
-![Cue](apps/editor/public/brand/cue-brand-kit.png)
+**Release status:** cloud account/persistence implementation is in progress. Read [the production plan](docs/PRODUCTION_PLAN.md) and [verification record](docs/VERIFICATION.md) before deploying. A public repository is not a claim that all external services are configured.
 
-Cue contains a Chrome capture extension, a Next.js editor/API, a durable Node worker, and a shared Remotion composition. Real screenshots remain editable alongside optional AI-generated takes. The editor has no dependency on a training run.
+## Application
 
-## Run locally
+- An editable Remotion timeline with captions, crops, transitions, three treatments, voice-over and music uploads.
+- Exact UI animations, generated clips and hybrid scenes; generated takes never overwrite sources.
+- A Chrome extension for explicitly reviewed screenshot routes and interaction recordings, including authenticated sites without exporting login cookies.
+- Account-based project library, revisions, autosave, conflict recovery, private media and encrypted user-supplied provider keys.
+- Runway video generation, Gemini storyboarding, ElevenLabs narration. These features require each user's own provider keys and credits.
+- PostgreSQL job records, Vercel Workflow orchestration and bounded Sandbox rendering independent of an open browser.
 
-Requirements: Node 22.18+ (24 LTS recommended), npm, FFmpeg/ffprobe on PATH, and Google Chrome. On macOS the renderer discovers the standard Chrome installation; elsewhere set `CUE_CHROME_PATH` to an installed compatible Chrome executable.
+## Production infrastructure
+
+Next.js is hosted on Vercel. Neon provides Postgres and managed authentication. Vercel Blob holds private media; Workflow and Sandbox execute durable jobs and renders. No production project relies on a developer's laptop filesystem or a shared operator API key.
+
+1. Create/link the Vercel project and provision Neon with Auth plus a private Blob store. The account holder must accept marketplace terms.
+2. Configure the server-only values in `.env.example`. Generate independent 32-byte secrets; use Vercel CLI sensitive envs. Keep an encrypted operator backup of the encryption key.
+3. `npm ci`, `npm run db:migrate`, `npm run check`.
+4. Publish the source commit and set `CUE_RENDER_REF` to that commit. Deploy with the Vercel CLI. GitHub Actions is not required.
+5. Create and verify an account. Add provider keys in Settings. Verify save/reload, account isolation, exports and provider execution before announcing a production release.
+
+## Development
+
+Use Node.js 24. Install dependencies with `npm ci`. Copy `.env.example` to `.env.local` and configure a **development** database/auth endpoint/private Blob store, not the production resources. Run `npm run dev` at http://127.0.0.1:5303. The local worker runs alongside Next; deployed jobs use Workflow and Sandbox.
+
+`npm run typecheck`, `npm test`, `npm run build` cover the application. `npm run test:e2e` requires `CUE_TEST_SESSION_COOKIE` for a dedicated signed-in test account; it has no admin bypass.
+
+For isolated unit/CLI experiments, `CUE_LOCAL_DATABASE=1` explicitly selects SQLite. It does not enable production authentication and must never be used as cloud persistence.
+
+## Importing existing local films
+
+Keep the old `.data` folder. After creating and verifying your account against the target database, run:
 
 ```sh
-npm ci
-npm run extension:build
-npm run dev
+npm run import:local -- your-verified-email@example.com /path/to/old/.data
 ```
 
-Open **http://127.0.0.1:5303**. The command starts the editor and worker together. Keep the terminal running while jobs finish. Rendering is restricted to one frame worker to limit interference with other workloads.
+The importer verifies ownership, preserves project/asset IDs and revision history, uploads media privately, skips already imported projects and does not delete local data or repeat paid requests. Provider credentials must be re-entered in Settings.
 
-```sh
-npm run seed       # Add the included real Cue screenshot example
-npm run check      # Typecheck, regression tests, production build
-npm run test:e2e   # Running server required; real landscape/portrait renders
-```
+## Capture extension
 
-For a production-mode local preview, stop `dev`, then run `npm run build` and `npm start`. Do not run Next build and dev against the same output directory simultaneously.
+`npm run extension:build` creates `dist/cue-capture.zip`. Load the unpacked `apps/extension` folder for local development. Open a project, choose Capture, and pair the extension with the project's one-time code. It requests access to your chosen HTTPS Cue address. Review route selection, screenshot masks and recordings before uploading. The real authenticated-browser capture test is currently postponed at the owner's request.
 
-## Make a film
+## Provider keys
 
-1. Create a project. Import screenshots/recordings or pair Cue Capture.
-2. Review the captures. Exclude any screens you do not want sent to the AI director.
-3. Set the product brief, audience, CTA and colors. Build a starter cut or request an AI storyboard. Proposals identify their evidence and need your review.
-4. Edit scene order, layout, captions, timing, motion, framing and sources. Changes are saved as immutable revisions; undo/redo operates on the current edit session.
-5. Optionally generate Runway takes. Choose **Exact UI**, **Generated video**, or **Hybrid** for each scene. Original captures and previous takes are retained.
-6. Assign recorded or generated narration and licensed music. Cue prevents export from cutting off narration or reading beyond a clip.
-7. Export MP4 in landscape, portrait or square. Download the poster, scene-level SRT captions and project ZIP.
+- [Runway developer portal](https://dev.runwayml.com/): create a developer API key and fund that account.
+- [Google AI Studio](https://aistudio.google.com/apikey): create a Gemini key with access to the configured model.
+- [ElevenLabs API keys](https://elevenlabs.io/app/settings/api-keys): create a key with text-to-speech access.
 
-**Exact UI is a deterministic composition, not generative video.** Generated video can distort interfaces; review every take. Hybrid composites the original interface over a generated background with controlled camera motion. It does not track UI onto arbitrary generated screens.
+Keys are encrypted at rest per account and used only for explicit jobs. Cue can capture and edit without AI keys. It does not currently generate music or sound effects; upload an audio track for the soundtrack.
 
-## Capture signed-in websites
-
-Download Cue Capture from `/guide`, or use `dist/cue-capture` after packaging. In Chrome, open `chrome://extensions`, enable Developer mode, and load that directory unpacked. This is a development extension, not a Chrome Web Store release.
-
-In Cue, open **Capture a website → Generate pairing code**. In the source website tab, open Cue Capture and pair it with the local studio. Click **Find pages in this tab**, review the same-origin route selection, then capture selected routes or a named current state. The batch limit is 25; other routes remain listed. Failed pages can be retried. Finish SSO/login yourself, return to your application, and resume. Cue does not click arbitrary website buttons or copy login cookies.
-
-The extension masks password/email fields and user-selected elements before saving screenshots. Matching text is excluded from evidence. Recordings are user-driven, capped at 60 seconds, silent, and persisted in IndexedDB chunks. They require sanitized demo data and manual review; screenshot masks do not automatically track private content in video. Navigation to a different origin discards the current recording. The original URL and scroll position are restored best-effort after a batch.
-
-Pairing codes expire after 10 minutes and work once. Capture tokens expire after 24 hours and are limited to one project. Imported assets are validated by their actual bytes, dimensions and duration; uploads use chunks and a final checksum. The browser retains the local capture until you discard it.
-
-## Optional AI providers
-
-The application runs capture, editing and local exports without provider keys. Add your own keys in **Settings**, or copy `.env.example` to `.env` and set only the providers you need:
-
-- **Runway:** image-to-video (`gen4_turbo` or `gen4.5`, 5/10 seconds).
-- **Gemini:** multimodal, structured storyboard proposals. `GEMINI_MODEL` can select another supported model.
-- **ElevenLabs:** optional stock-voice narration using your chosen voice ID.
-
-Keys saved in Settings use AES-256-GCM with owner/provider-bound authenticated data. The local master key is stored separately with restricted file permissions; `CUE_MASTER_KEY` can supply a 32-byte hex key from your environment. Keys never enter project archives or the extension.
-
-This is an **owner-only loopback application**. Do not expose it publicly or put a tunnel in front of it. It has no hosted user accounts. Before external users can run AI, the hosted version must add real authentication, tenant isolation, managed encryption keys, PostgreSQL/object storage and mandatory per-user keys. Other owners never fall back to the local owner's provider credentials.
-
-Generation shows a cost estimate and reserves project budget before queuing. Provider billing remains authoritative. An interrupted submit without a saved task ID becomes **unknown** and is not automatically repeated. Check provider history, then resolve it in **Export → Job history**. Saved task IDs are polled after restart without submitting another generation. Cancelling a provider task may still incur its charge.
-
-## Data and restart behavior
-
-Projects, media, jobs, revisions, encrypted credentials and events live in `.data/`, outside Git. Back up the entire directory while Cue is stopped, including the encryption/session key files. Project ZIPs contain sanitized media and a JSON manifest with selected takes, but not provider keys, cookies or private installation credentials.
-
-Stop Cue with Ctrl-C. The worker stops after saving the current job. If a process exits abruptly, leases expire and saved provider tasks resume polling. Completed capture images and recording chunks survive browser restarts. Unknown provider submissions require manual reconciliation to avoid duplicate billing.
-
-## Verification and limits
-
-See [verification notes](docs/VERIFICATION.md), [architecture](docs/ARCHITECTURE.md), [brand guide](docs/BRAND.md) and [upstream provenance](UPSTREAM.md).
-
-The automated suite covers auth/origin checks, encryption and owner isolation, edits/history, budget reservations, duplicate jobs, recovery, media normalization, byte ranges, resumable uploads, recording chunks and provider request contracts. `test:e2e` exercises the actual server/worker/compositor and exports two playable MP4s with audio.
-
-Live provider calls require configured accounts and an approved test budget. Stubbed provider tests do not establish real generation quality. The manual Chrome extension capture/recording matrix must also be completed before release. Nothing is deployed automatically.
+See [security](docs/SECURITY.md), [architecture](docs/ARCHITECTURE.md), and [upstream provenance](UPSTREAM.md). Public visibility does not grant a license absent an explicit license file.

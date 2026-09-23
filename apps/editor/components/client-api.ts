@@ -12,7 +12,15 @@ export async function api<T = any>(
     },
   });
   const x = await r.json();
-  if (!r.ok) throw new Error(x.error || "The request could not be completed.");
+  if (!r.ok) {
+    if (r.status === 401 && !location.pathname.startsWith("/auth/"))
+      location.assign(
+        `/auth/sign-in?next=${encodeURIComponent(location.pathname)}`,
+      );
+    const e = new Error(x.error || "The request could not be completed.");
+    Object.assign(e, { status: r.status });
+    throw e;
+  }
   return x;
 }
 export function jobOptions(body: unknown): RequestInit {

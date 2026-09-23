@@ -4,15 +4,18 @@ const children = [
   spawn(
     process.execPath,
     [
-      "node_modules/next/dist/bin/next",
+      `${root}/node_modules/next/dist/bin/next`,
       "dev",
-      "apps/editor",
       "--hostname",
       "127.0.0.1",
       "--port",
       String(port),
     ],
-    { cwd: root, stdio: "inherit", env: { ...process.env, CUE_ROOT: root } },
+    {
+      cwd: `${root}/apps/editor`,
+      stdio: "inherit",
+      env: { ...process.env, CUE_ROOT: root },
+    },
   ),
   spawn(process.execPath, ["--import", "tsx", "apps/worker/main.ts"], {
     cwd: root,

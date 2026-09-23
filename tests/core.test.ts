@@ -1,3 +1,4 @@
+import { account } from "./auth-fixture";
 import { afterAll, describe, expect, it } from "vitest";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -17,7 +18,8 @@ import {
   validateRender,
   now,
 } from "../packages/storage/db";
-import { origin, sessionSecret, dataDir } from "../packages/storage/config";
+import { writeObject } from "../packages/storage/objects";
+import { origin, dataDir } from "../packages/storage/config";
 import {
   assertOwner,
   assertCapture,
@@ -51,7 +53,7 @@ function request(
     method,
     headers: {
       origin,
-      authorization: `Bearer ${sessionSecret}`,
+      authorization: "Bearer forged-local-secret",
       ...(value !== undefined ? { "Content-Type": "application/json" } : {}),
       ...headers,
     },
@@ -80,36 +82,45 @@ const shot = (assetId: string | null, extra = {}) =>
     ...extra,
   });
 afterAll(async () => {
-  db.close();
+  await db.close();
   await fs.rm(dataDir, { recursive: true, force: true });
 });
 
-describe("private sessions and credentials", () => {
-  it("rejects another website even when a session credential is supplied", () => {
-    expect(() =>
+describe("account sessions and credentials", () => {
+  it("rejects another website even when a session credential is supplied", async () => {
+    await expect(
       assertOwner(
         request("projects", "POST", {}, { origin: "https://attacker.example" }),
       ),
-    ).toThrow("origin");
-    expect(() =>
+    ).rejects.toThrow("origin");
+    await expect(
       assertOwner(
         request("projects", "GET", undefined, { host: "attacker.example" }),
       ),
-    ).toThrow("configured host");
+    ).rejects.toThrow("Request host");
   });
   it("requires a session for reads and never accepts a forged cookie", async () => {
+    account.user = null;
     const response = await call("projects", "GET", undefined, {
       authorization: "",
       cookie: "cue_session=no",
     });
     expect(response.status).toBe(401);
+    account.user = {
+      id: "local",
+      name: "Test",
+      email: "test@example.test",
+      emailVerified: true,
+    };
   });
-  it("makes pairing single-use, expiring, and scoped to one project", () => {
-    const a = createProject("A"),
-      b = createProject("B");
-    const { code } = createPairing(a.id),
-      pair = exchangePairing(code);
-    expect(() => exchangePairing(code)).toThrow("expired");
+  it("makes pairing single-use, expiring, and scoped to one project", async () => {
+    const a = await createProject("A"),
+      b = await createProject("B");
+    const { code } = await createPairing(a.id, "local"),
+      pair = await exchangePairing(code, request("pairing/exchange", "POST"));
+    await expect(
+      exchangePairing(code, request("pairing/exchange", "POST")),
+    ).rejects.toThrow("expired");
     const req = request(
       "uploads",
       "POST",
@@ -119,12 +130,12 @@ describe("private sessions and credentials", () => {
         authorization: `Bearer ${pair.token}`,
       },
     );
-    expect(() => assertCapture(req, a.id)).not.toThrow();
-    expect(() => assertCapture(req, b.id)).toThrow("Pair");
-    db.prepare("UPDATE capture_tokens SET expiresAt=0").run();
-    expect(() => assertCapture(req, a.id)).toThrow("Pair");
+    await expect(assertCapture(req, a.id)).resolves.toBe("local");
+    await expect(assertCapture(req, b.id)).rejects.toThrow("Pair");
+    await db.prepare("UPDATE capture_tokens SET expiresAt=0").run();
+    await expect(assertCapture(req, a.id)).rejects.toThrow("Pair");
   });
-  it("encrypts keys with owner/provider authentication and no cross-owner fallback", () => {
+  it("encrypts keys with owner/provider authentication and no cross-owner fallback", async () => {
     const ciphertext = encryptCredential(
       "alice",
       "runway",
@@ -137,12 +148,12 @@ describe("private sessions and credentials", () => {
     expect(() => decryptCredential("bob", "runway", ciphertext)).toThrow();
     expect(() => decryptCredential("alice", "gemini", ciphertext)).toThrow();
     process.env.RUNWAYML_API_SECRET = "owner-key-only";
-    expect(credential("local", "runway")).toBe("owner-key-only");
-    expect(() => credential("alice", "runway")).toThrow("Configure");
+    await expect(credential("local", "runway")).rejects.toThrow("Configure");
+    await expect(credential("alice", "runway")).rejects.toThrow("Configure");
     delete process.env.RUNWAYML_API_SECRET;
   });
   it("returns only masked credential status", async () => {
-    putCredential("local", "gemini", "never-return-this-key-1234");
+    await putCredential("local", "gemini", "never-return-this-key-1234");
     const text = await (await call("settings")).text();
     expect(text).toContain("1234");
     expect(text).not.toContain("never-return");
@@ -150,38 +161,43 @@ describe("private sessions and credentials", () => {
 });
 
 describe("saved films and render preflight", () => {
-  it("preserves immutable history and rejects stale saves", () => {
-    const p = createProject("Film");
-    const updated = editProject(p.id, 1, { ...p.draft, title: "Revised" });
+  it("preserves immutable history and rejects stale saves", async () => {
+    const p = await createProject("Film");
+    const updated = await editProject(p.id, 1, {
+      ...p.draft,
+      title: "Revised",
+    });
     expect(updated.revision).toBe(2);
-    expect(() => editProject(p.id, 1, p.draft)).toThrow("Revision conflict");
+    await expect(editProject(p.id, 1, p.draft)).rejects.toThrow(
+      "Revision conflict",
+    );
     expect(
       JSON.parse(
         String(
           (
-            db
+            (await db
               .prepare(
                 "SELECT draft FROM revisions WHERE projectId=? AND revision=1",
               )
-              .get(p.id) as any
+              .get(p.id)) as any
           ).draft,
         ),
       ).title,
     ).toBe("Film");
   });
   it("rejects cross-project assets and invalid crop bounds", async () => {
-    const a = createProject("A"),
-      b = createProject("B");
+    const a = await createProject("A"),
+      b = await createProject("B");
     const source = await importMedia(a.id, await png(), "screen.png");
-    expect(() =>
+    await expect(
       editProject(b.id, 1, { ...b.draft, shots: [shot(source.id)] }),
-    ).toThrow("belong");
+    ).rejects.toThrow("belong");
     expect(() =>
       shot(source.id, { focalRect: { x: 0.7, y: 0, width: 0.5, height: 1 } }),
     ).toThrow("Crop");
   });
   it("prevents audio truncation and incomplete generated scenes", async () => {
-    const p = createProject("Narration");
+    const p = await createProject("Narration");
     const file = path.join(dataDir, "voice.wav");
     await run("ffmpeg", [
       "-v",
@@ -199,14 +215,16 @@ describe("saved films and render preflight", () => {
       ...p.draft,
       shots: [shot(null, { template: "endcard", narrationAssetId: audio.id })],
     };
-    expect(() => validateRender(p.id, draft)).toThrow("Narration is longer");
+    await expect(validateRender(p.id, draft)).rejects.toThrow(
+      "Narration is longer",
+    );
     draft.shots[0].duration = 5;
-    expect(() => validateRender(p.id, draft)).not.toThrow();
+    await expect(validateRender(p.id, draft)).resolves.toBeUndefined();
     draft.shots[0].mode = "hybrid";
-    expect(() => validateRender(p.id, draft)).toThrow("generated take");
+    await expect(validateRender(p.id, draft)).rejects.toThrow("generated take");
   });
-  it("rejects an AI plan with invented asset references", () => {
-    const p = createProject("Plan");
+  it("rejects an AI plan with invented asset references", async () => {
+    const p = await createProject("Plan");
     expect(() =>
       applyPlan(p.draft, [], {
         shots: [{ assetId: "invented" }, { assetId: "invented" }],
@@ -216,10 +234,10 @@ describe("saved films and render preflight", () => {
 });
 
 describe("jobs and spending", () => {
-  it("reserves budget atomically and deduplicates a repeated request", () => {
-    const p = createProject("Budget");
-    editProject(p.id, 1, { ...p.draft, budgetCents: 30 });
-    const first = enqueue(
+  it("reserves budget atomically and deduplicates a repeated request", async () => {
+    const p = await createProject("Budget");
+    await editProject(p.id, 1, { ...p.draft, budgetCents: 30 });
+    const first = await enqueue(
       p.id,
       "generate",
       { model: "gen4_turbo" },
@@ -227,36 +245,45 @@ describe("jobs and spending", () => {
       25,
     );
     expect(
-      enqueue(p.id, "generate", { model: "gen4_turbo" }, "same-request", 25).id,
+      (
+        await enqueue(
+          p.id,
+          "generate",
+          { model: "gen4_turbo" },
+          "same-request",
+          25,
+        )
+      ).id,
     ).toBe(first.id);
-    expect(budget(p.id).reserved).toBe(25);
-    expect(() => enqueue(p.id, "generate", {}, "another-request", 25)).toThrow(
-      "spending limit",
-    );
-    expect(() => enqueue(p.id, "render", {}, "same-request")).toThrow(
+    expect((await budget(p.id)).reserved).toBe(25);
+    await expect(
+      enqueue(p.id, "generate", {}, "another-request", 25),
+    ).rejects.toThrow("spending limit");
+    await expect(enqueue(p.id, "render", {}, "same-request")).rejects.toThrow(
       "Idempotency conflict",
     );
-    updateJob(first, {
+    await updateJob(first, {
       state: "completed",
       reservedCents: 0,
       chargedCents: 25,
     });
-    expect(budget(p.id).spent).toBe(25);
+    expect((await budget(p.id)).spent).toBe(25);
   });
-  it("does not retry a submission with an unknown provider outcome", () => {
-    const p = createProject("Recovery");
-    const j = enqueue(p.id, "generate", {}, "interrupted-call", 25);
-    updateJob(j, { state: "submitting", leaseUntil: 0 });
-    expect(claimJob()).toBeNull();
-    expect(budget(p.id).reserved).toBe(25);
+  it("does not retry a submission with an unknown provider outcome", async () => {
+    const p = await createProject("Recovery");
+    const j = await enqueue(p.id, "generate", {}, "interrupted-call", 25);
+    await updateJob(j, { state: "submitting", leaseUntil: 0 });
+    expect(await claimJob()).toBeNull();
+    expect((await budget(p.id)).reserved).toBe(25);
     expect(
-      (db.prepare("SELECT state FROM jobs WHERE id=?").get(j.id) as any).state,
+      ((await db.prepare("SELECT state FROM jobs WHERE id=?").get(j.id)) as any)
+        .state,
     ).toBe("unknown");
   });
   it("requires an explicit provider-history check to release an uncertain reservation", async () => {
-    const p = createProject("Reconcile"),
-      j = enqueue(p.id, "generate", {}, "unknown-result", 25);
-    updateJob(j, { state: "unknown" });
+    const p = await createProject("Reconcile"),
+      j = await enqueue(p.id, "generate", {}, "unknown-result", 25);
+    await updateJob(j, { state: "unknown" });
     expect(
       (
         await call(`jobs/${j.id}/reconcile`, "POST", {
@@ -272,10 +299,10 @@ describe("jobs and spending", () => {
         })
       ).status,
     ).toBe(200);
-    expect(budget(p.id).reserved).toBe(0);
+    expect((await budget(p.id)).reserved).toBe(0);
   });
-  it("deduplicates takes when retrieval resumes", () => {
-    const p = createProject("Takes");
+  it("deduplicates takes when retrieval resumes", async () => {
+    const p = await createProject("Takes");
     const value = {
       id: randomUUID(),
       projectId: p.id,
@@ -287,15 +314,15 @@ describe("jobs and spending", () => {
       sourceHash: "hash",
       createdAt: now(),
     };
-    addTake(value);
-    addTake({ ...value, id: randomUUID() });
-    expect(takes(p.id)).toHaveLength(1);
+    await addTake(value);
+    await addTake({ ...value, id: randomUUID() });
+    expect(await takes(p.id)).toHaveLength(1);
   });
 });
 
 describe("media and resumable uploads", () => {
   it("checks actual bytes, strips unsafe URLs, and deduplicates imports", async () => {
-    const p = createProject("Images"),
+    const p = await createProject("Images"),
       bytes = await png();
     const a = await importMedia(p.id, bytes, "screen.png", {
       url: "https://site.test/view?token=secret&tab=overview",
@@ -314,7 +341,7 @@ describe("media and resumable uploads", () => {
     ).rejects.toThrow("Choose a PNG");
   });
   it("normalizes duration-less recorder WebM and rejects trims past its end", async () => {
-    const p = createProject("Recording");
+    const p = await createProject("Recording");
     const { stdout } = await run(
       "ffmpeg",
       [
@@ -339,18 +366,18 @@ describe("media and resumable uploads", () => {
     );
     expect(a.mime).toBe("video/mp4");
     expect(a.duration).toBeCloseTo(2, 1);
-    expect(() =>
+    await expect(
       validateRender(p.id, { ...p.draft, shots: [shot(a.id)] }),
-    ).toThrow("beyond");
-    expect(() =>
+    ).rejects.toThrow("beyond");
+    await expect(
       validateRender(p.id, {
         ...p.draft,
         shots: [shot(a.id, { duration: 1, trimStart: 0.5 })],
       }),
-    ).not.toThrow();
+    ).resolves.toBeUndefined();
   });
   it("supports chunk retry, rejects wrong checksums, and finishes idempotently", async () => {
-    const p = createProject("Upload"),
+    const p = await createProject("Upload"),
       bytes = await png();
     const init = await (
       await call(`projects/${p.id}/uploads`, "POST", {
@@ -364,7 +391,7 @@ describe("media and resumable uploads", () => {
       handle(
         new Request(`${origin}/api/${route}`, {
           method: "PUT",
-          headers: { origin, authorization: `Bearer ${sessionSecret}` },
+          headers: { origin, authorization: "Bearer forged-local-secret" },
           body: bytes,
         }),
         route.split("/"),
@@ -378,7 +405,7 @@ describe("media and resumable uploads", () => {
       await call(`uploads/${init.id}/complete`, "POST")
     ).json();
     expect(first.asset.id).toBe(second.asset.id);
-    expect(assets(p.id)).toHaveLength(1);
+    expect(await assets(p.id)).toHaveLength(1);
     const bad = await (
       await call(`projects/${p.id}/uploads`, "POST", {
         name: "bad.png",
@@ -386,12 +413,11 @@ describe("media and resumable uploads", () => {
         hash: "a".repeat(64),
       })
     ).json();
-    await fs.mkdir(path.join(dataDir, "uploads", bad.id), { recursive: true });
-    await fs.writeFile(path.join(dataDir, "uploads", bad.id, "0.part"), bytes);
+    await writeObject(`uploads/${p.id}/${bad.id}/0.part`, bytes);
     expect((await call(`uploads/${bad.id}/complete`, "POST")).status).toBe(400);
   });
   it("serves byte ranges for seekable video/audio and rejects invalid ranges", async () => {
-    const p = createProject("Ranges"),
+    const p = await createProject("Ranges"),
       a = await importMedia(p.id, await png(), "range.png");
     const partial = await call(`assets/${a.id}`, "GET", undefined, {
       range: "bytes=0-9",
@@ -434,7 +460,7 @@ describe("creative direction", () => {
   it("retains excluded captures for editing without sending them to the planner", async () => {
     const { evidenceAssets, starterStoryboard } =
       await import("../packages/director");
-    const p = createProject("Direction");
+    const p = await createProject("Direction");
     const a = await importMedia(p.id, await png(), "one.png");
     const b = await importMedia(
       p.id,
@@ -446,16 +472,16 @@ describe("creative direction", () => {
       "two.png",
     );
     const draft = { ...p.draft, excludedAssetIds: [b.id] };
-    expect(evidenceAssets(draft, assets(p.id)).map((a) => a.id)).toEqual([
+    expect(evidenceAssets(draft, await assets(p.id)).map((a) => a.id)).toEqual([
       a.id,
     ]);
     const minimal = starterStoryboard(
       { ...draft, treatment: "minimal" },
-      assets(p.id),
+      await assets(p.id),
     );
     const energetic = starterStoryboard(
       { ...draft, treatment: "energetic" },
-      assets(p.id),
+      await assets(p.id),
     );
     expect(minimal.shots[0].motion).toBe("still");
     expect(energetic.shots[0].duration).toBeLessThan(minimal.shots[0].duration);

@@ -18,6 +18,7 @@ import {
   jobs,
   project,
   projects,
+  projectStorage,
   snapshot,
   takes,
   tx,
@@ -32,13 +33,7 @@ import {
   providerSchema,
   type Asset,
 } from "../contracts";
-import {
-  assetSignature,
-  dataDir,
-  origin,
-  root,
-  safeEqual,
-} from "../storage/config";
+import { validAssetSignature, dataDir, origin, root } from "../storage/config";
 import {
   assertCapture,
   assertHost,
@@ -63,6 +58,16 @@ import {
   removeCredential,
 } from "../storage/credentials";
 import { starterStoryboard, inferredPalette } from "../director";
+import { rateLimit, cloudDatabase } from "../storage/client";
+import { readAsset } from "../storage/media";
+import {
+  writeObject,
+  readObject,
+  deleteObject,
+  streamObject,
+  cloudObjects,
+} from "../storage/objects";
+import { dispatchJob } from "../cloud/dispatch";
 import { videoPrice } from "../providers";
 
 const json = (x: unknown, status = 200) =>
@@ -100,6 +105,29 @@ function srt(draft: ReturnType<typeof draftSchema.parse>) {
     .join("\n");
 }
 async function serveAsset(req: Request, asset: Asset) {
+  if (cloudObjects()) {
+    const { stream, headers: remote } = await streamObject(
+      asset.path,
+      req.headers.get("range"),
+    );
+    const headers = new Headers({
+      "Content-Type": asset.mime,
+      "Cache-Control": "private, no-store",
+      "X-Content-Type-Options": "nosniff",
+      "Accept-Ranges": "bytes",
+    });
+    for (const k of ["content-length", "content-range"])
+      if (remote.has(k)) headers.set(k, remote.get(k)!);
+    if (new URL(req.url).searchParams.has("download"))
+      headers.set(
+        "Content-Disposition",
+        `attachment; filename="${cleanName(asset.name)}"`,
+      );
+    return new Response(stream, {
+      status: remote.has("content-range") ? 206 : 200,
+      headers,
+    });
+  }
   const file = assetPath(asset),
     stat = await fs.stat(file),
     range = req.headers.get("range");
@@ -173,6 +201,14 @@ export async function handle(req: Request, parts: string[]): Promise<Response> {
     }
     return response;
   } catch (e: any) {
+    if (e.code && typeof e.code === "string")
+      return json(
+        {
+          error:
+            "Storage is temporarily unavailable. Your saved work is unchanged. Please retry.",
+        },
+        503,
+      );
     const status =
       e instanceof HttpError
         ? e.status
@@ -201,22 +237,26 @@ async function dispatch(req: Request, p: string[]): Promise<Response> {
     if (!isExtension(requestOrigin(req)) && requestOrigin(req) !== origin)
       throw new HttpError(403, "Use the Cue extension to pair.");
     const b = z.object({ code: z.string().length(12) }).parse(await body(req));
-    return json(exchangePairing(b.code));
+    return json(await exchangePairing(b.code, req));
   }
   if (p[0] === "assets" && p[1] && method === "GET") {
     const signature = new URL(req.url).searchParams.get("signature") || "";
-    if (!safeEqual(signature, assetSignature(p[1]))) assertOwner(req);
-    return serveAsset(req, getAsset(p[1]));
+    const asset = await getAsset(p[1]);
+    if (!signature || !validAssetSignature(p[1], signature))
+      await project(asset.projectId, await assertOwner(req));
+    return serveAsset(req, asset);
   }
   if (p[0] === "uploads" && p[1]) {
-    const row: any = db.prepare("SELECT * FROM uploads WHERE id=?").get(p[1]);
+    const row: any = await db
+      .prepare("SELECT * FROM uploads WHERE id=?")
+      .get(p[1]);
     if (!row) throw new HttpError(404, "Upload not found.");
-    assertCapture(req, row.projectId);
+    await assertCapture(req, row.projectId);
     const state = JSON.parse(row.data);
     if (method === "GET") return json({ ...state, id: row.id });
-    if (state.assetId) return json({ asset: getAsset(state.assetId) });
-    const dir = path.join(dataDir, "uploads", row.id);
-    await fs.mkdir(dir, { recursive: true });
+    if (state.assetId) return json({ asset: await getAsset(state.assetId) });
+    if (Date.now() - Number(row.createdAt) > 86400000)
+      throw new HttpError(410, "Upload expired. Start a new upload.");
     if (p[2] === "chunks" && method === "PUT") {
       const index = Number(p[3]);
       if (!Number.isInteger(index) || index < 0 || index >= state.chunks)
@@ -225,13 +265,19 @@ async function dispatch(req: Request, p: string[]): Promise<Response> {
       const expected = Math.min(1024 * 1024, state.bytes - index * 1024 * 1024);
       if (chunk.length !== expected)
         throw new HttpError(400, "Upload chunk has the wrong length.");
-      await fs.writeFile(path.join(dir, `${index}.part`), chunk);
+      const objectPath = `uploads/${row.projectId}/${row.id}/${index}.part`;
+      await writeObject(objectPath, chunk, "application/octet-stream", true);
+      await db
+        .prepare(
+          "INSERT INTO upload_chunks VALUES(?,?,?,?) ON CONFLICT(upload_id,chunk_index) DO UPDATE SET object_path=excluded.object_path,hash=excluded.hash",
+        )
+        .run(row.id, index, objectPath, hash(chunk));
       return json({ received: index, hash: hash(chunk) });
     }
     if (p[2] === "complete" && method === "POST") {
       const buffers = await Promise.all(
         Array.from({ length: state.chunks }, (_, i) =>
-          fs.readFile(path.join(dir, `${i}.part`)),
+          readObject(`uploads/${row.projectId}/${row.id}/${i}.part`),
         ),
       );
       const buffer = Buffer.concat(buffers);
@@ -240,18 +286,25 @@ async function dispatch(req: Request, p: string[]): Promise<Response> {
           400,
           "Upload checksum did not match. Retry the missing chunks.",
         );
-      const asset = await importMedia(
-        row.projectId,
-        buffer,
-        state.name,
-        state.metadata,
-      );
-      db.prepare("UPDATE uploads SET data=? WHERE id=?").run(
-        JSON.stringify({ ...state, assetId: asset.id }),
-        row.id,
-      );
-      await fs.rm(dir, { recursive: true, force: true });
-      return json({ asset });
+      return tx(async () => {
+        const fresh = await db
+          .prepare("SELECT data FROM uploads WHERE id=? FOR UPDATE")
+          .get(row.id);
+        const current = JSON.parse(fresh.data);
+        if (current.assetId)
+          return json({ asset: await getAsset(current.assetId) });
+        const asset = await importMedia(
+          row.projectId,
+          buffer,
+          state.name,
+          state.metadata,
+        );
+        await db
+          .prepare("UPDATE uploads SET data=? WHERE id=?")
+          .run(JSON.stringify({ ...state, assetId: asset.id }), row.id);
+        // Chunks remain until the expiry sweep so parallel completion requests stay safe.
+        return json({ asset });
+      });
     }
     throw new HttpError(404, "Upload operation not found.");
   }
@@ -261,8 +314,15 @@ async function dispatch(req: Request, p: string[]): Promise<Response> {
     ["media", "uploads"].includes(p[2]) &&
     method === "POST"
   ) {
-    assertCapture(req, p[1]);
-    project(p[1]);
+    const captureOwner = await assertCapture(req, p[1]);
+    await project(p[1]);
+    if (!(await rateLimit(`upload:${captureOwner}`, 60, 60000)))
+      throw new HttpError(429, "Please wait before uploading more media.");
+    if ((await projectStorage(captureOwner)) > 960 * 1048576)
+      throw new HttpError(
+        400,
+        "Your account has reached its 1 GiB media limit.",
+      );
     if (p[2] === "uploads") {
       const b = z
         .object({
@@ -274,12 +334,9 @@ async function dispatch(req: Request, p: string[]): Promise<Response> {
         .parse(await body(req));
       const state = { ...b, chunks: Math.ceil(b.bytes / (1024 * 1024)) },
         id = randomUUID();
-      db.prepare("INSERT INTO uploads VALUES(?,?,?,?)").run(
-        id,
-        p[1],
-        JSON.stringify(state),
-        Date.now(),
-      );
+      await db
+        .prepare("INSERT INTO uploads VALUES(?,?,?,?)")
+        .run(id, p[1], JSON.stringify(state), Date.now());
       return json({ id, ...state });
     }
     const bytes = await readBounded(req.body),
@@ -294,51 +351,69 @@ async function dispatch(req: Request, p: string[]): Promise<Response> {
     }
     return json({ asset: await importMedia(p[1], bytes, name, metadata) }, 201);
   }
-  assertOwner(req);
-  if (p[0] === "health")
-    return json({ ok: true, mode: "private-local", origin });
+  const owner = await assertOwner(req);
+  if (
+    !["GET", "HEAD"].includes(method) &&
+    !(await rateLimit(`writes:${owner}`, 120, 60000))
+  )
+    throw new HttpError(429, "Too many requests. Try again shortly.");
+  if (p[0] === "health") return json({ ok: true, mode: "account", origin });
   if (p[0] === "settings") {
     if (method === "GET")
       return json({
-        providers: credentialStatus(),
-        mode: "private-local",
+        providers: await credentialStatus(owner),
+        mode: "account",
         voiceId: process.env.ELEVENLABS_VOICE_ID || "",
         origin,
       });
+    await assertOwner(req, true);
     const b = z
       .object({
         provider: providerSchema,
         key: z.string().min(12).max(1024).optional(),
       })
       .parse(await body(req));
-    if (method === "DELETE") removeCredential("local", b.provider);
+    if (method === "DELETE") await removeCredential(owner, b.provider);
     else if (method === "PUT" && b.key)
-      putCredential("local", b.provider, b.key);
+      await putCredential(owner, b.provider, b.key);
     else throw new HttpError(400, "Enter a provider key.");
-    return json({ providers: credentialStatus() });
+    return json({ providers: await credentialStatus(owner) });
   }
   if (p[0] === "projects" && !p[1]) {
     if (method === "GET")
       return json({
-        projects: projects().map((x) => ({
-          ...x,
-          assetCount: assets(x.id).length,
-          thumbnail: assets(x.id).find((a) => a.kind === "image")?.id || null,
-        })),
+        projects: await Promise.all(
+          (await projects(owner)).map(async (x) => ({
+            ...x,
+            archived: !!(await db
+              .prepare(
+                "SELECT projectId FROM project_archive WHERE projectId=?",
+              )
+              .get(x.id)),
+            assetCount: (await assets(x.id)).length,
+            thumbnail:
+              (await assets(x.id)).find((a) => a.kind === "image")?.id || null,
+          })),
+        ),
       });
     if (method === "POST") {
+      if ((await projects(owner)).length >= 100)
+        throw new HttpError(400, "Each account can have up to 100 projects.");
       const b = createProjectSchema.parse(await body(req));
       if (b.siteUrl && !/^https?:\/\//.test(b.siteUrl))
         throw new HttpError(
           400,
           "Use a complete http:// or https:// website address.",
         );
-      return json({ project: createProject(b.title, b.siteUrl) }, 201);
+      return json(
+        { project: await createProject(b.title, b.siteUrl, owner) },
+        201,
+      );
     }
   }
   if (p[0] === "jobs" && p[1] && p[2] === "reconcile" && method === "POST") {
-    const j = getJob(p[1]);
-    project(j.projectId);
+    const j = await getJob(p[1]);
+    await project(j.projectId, owner);
     if (j.state !== "unknown")
       throw new HttpError(
         400,
@@ -351,7 +426,7 @@ async function dispatch(req: Request, p: string[]): Promise<Response> {
       })
       .parse(await body(req));
     return json({
-      job: updateJob(j, {
+      job: await updateJob(j, {
         state: "failed",
         chargedCents:
           b.outcome === "charged" ? j.reservedCents : j.chargedCents,
@@ -364,8 +439,8 @@ async function dispatch(req: Request, p: string[]): Promise<Response> {
     });
   }
   if (p[0] === "jobs" && p[1] && p[2] === "cancel" && method === "POST") {
-    const j = getJob(p[1]);
-    project(j.projectId);
+    const j = await getJob(p[1]);
+    await project(j.projectId, owner);
     if (j.state === "unknown")
       throw new HttpError(
         400,
@@ -374,7 +449,7 @@ async function dispatch(req: Request, p: string[]): Promise<Response> {
     if (["completed", "failed", "cancelled"].includes(j.state))
       return json({ job: j });
     return json({
-      job: updateJob(j, {
+      job: await updateJob(j, {
         cancelRequested: true,
         ...(j.state === "queued"
           ? { state: "cancelled" as const, reservedCents: 0 }
@@ -385,28 +460,31 @@ async function dispatch(req: Request, p: string[]): Promise<Response> {
   if (p[0] !== "projects" || !p[1])
     throw new HttpError(404, "Endpoint not found.");
   const id = p[1],
-    current = project(id);
-  if (!p[2] && method === "GET") return json(snapshot(id));
-  if (p[2] === "pairing" && method === "POST") return json(createPairing(id));
+    current = await project(id, owner);
+  if (!p[2] && method === "GET") return json(await snapshot(id));
+  if (p[2] === "pairing" && method === "POST")
+    return json(await createPairing(id, owner));
   if (p[2] === "revoke-pairing" && method === "POST") {
-    db.prepare("DELETE FROM capture_tokens WHERE projectId=?").run(id);
-    db.prepare("DELETE FROM pairing WHERE projectId=?").run(id);
+    await db.prepare("DELETE FROM capture_tokens WHERE projectId=?").run(id);
+    await db.prepare("DELETE FROM pairing WHERE projectId=?").run(id);
     return json({ revoked: true });
   }
   if (p[2] === "edits" && method === "POST") {
     const b = editSchema.parse(await body(req));
-    return json({ project: editProject(id, b.revision, b.draft, b.label) });
+    return json({
+      project: await editProject(id, b.revision, b.draft, b.label),
+    });
   }
   if (p[2] === "restore" && method === "POST") {
     const b = z
       .object({ revision: z.number().int(), target: z.number().int() })
       .parse(await body(req));
-    const row: any = db
+    const row: any = await db
       .prepare("SELECT draft FROM revisions WHERE projectId=? AND revision=?")
       .get(id, b.target);
     if (!row) throw new HttpError(404, "Revision not found.");
     return json({
-      project: editProject(
+      project: await editProject(
         id,
         b.revision,
         JSON.parse(row.draft),
@@ -415,27 +493,33 @@ async function dispatch(req: Request, p: string[]): Promise<Response> {
     });
   }
   if (p[2] === "palette" && method === "GET")
-    return json({ palette: inferredPalette(assets(id)) });
+    return json({ palette: inferredPalette(await assets(id)) });
   if (p[2] === "storyboard" && method === "POST") {
     const b = z.object({ revision: z.number().int() }).parse(await body(req));
     return json({
-      project: editProject(
+      project: await editProject(
         id,
         b.revision,
-        starterStoryboard(current.draft, assets(id)),
+        starterStoryboard(current.draft, await assets(id)),
         "Create starter storyboard",
       ),
     });
   }
+  if (
+    ["plan", "generate", "narrate", "render"].includes(p[2]) &&
+    method === "POST"
+  )
+    await assertOwner(req, true);
   if (p[2] === "plan" && method === "POST") {
-    credential("local", "gemini");
+    await credential(owner, "gemini");
     const b = z.object({ revision: z.number().int() }).parse(await body(req));
     if (b.revision !== current.revision)
       throw new HttpError(409, "Revision conflict.");
-    if (!assets(id).length) throw new HttpError(400, "Capture a screen first.");
+    if (!(await assets(id)).length)
+      throw new HttpError(400, "Capture a screen first.");
     return json(
       {
-        job: enqueue(
+        job: await queue(
           id,
           "plan",
           { draft: current.draft, revision: b.revision },
@@ -450,7 +534,7 @@ async function dispatch(req: Request, p: string[]): Promise<Response> {
     const b = z
       .object({ revision: z.number().int(), jobId: z.string() })
       .parse(await body(req));
-    const j = getJob(b.jobId);
+    const j = await getJob(b.jobId);
     if (
       j.projectId !== id ||
       j.kind !== "plan" ||
@@ -459,7 +543,7 @@ async function dispatch(req: Request, p: string[]): Promise<Response> {
     )
       throw new HttpError(400, "No completed proposal found.");
     return json({
-      project: editProject(
+      project: await editProject(
         id,
         b.revision,
         j.payload.result,
@@ -468,7 +552,7 @@ async function dispatch(req: Request, p: string[]): Promise<Response> {
     });
   }
   if (p[2] === "generate" && method === "POST") {
-    credential("local", "runway");
+    await credential(owner, "runway");
     const b = z
       .object({
         revision: z.number().int(),
@@ -483,7 +567,7 @@ async function dispatch(req: Request, p: string[]): Promise<Response> {
     const shot = current.draft.shots.find((s) => s.id === b.shotId);
     if (!shot?.assetId || !shot.prompt)
       throw new HttpError(400, "Select an image and write a motion prompt.");
-    const a = getAsset(shot.assetId);
+    const a = await getAsset(shot.assetId);
     if (a.kind !== "image")
       throw new HttpError(400, "Generation needs a still image reference.");
     const cost = videoPrice(b.model, b.seconds);
@@ -491,7 +575,7 @@ async function dispatch(req: Request, p: string[]): Promise<Response> {
       throw new HttpError(400, "The generation exceeds the approved cost.");
     return json(
       {
-        job: enqueue(
+        job: await queue(
           id,
           "generate",
           {
@@ -513,7 +597,7 @@ async function dispatch(req: Request, p: string[]): Promise<Response> {
     );
   }
   if (p[2] === "narrate" && method === "POST") {
-    credential("local", "elevenlabs");
+    await credential(owner, "elevenlabs");
     const b = z
       .object({
         revision: z.number().int(),
@@ -527,7 +611,7 @@ async function dispatch(req: Request, p: string[]): Promise<Response> {
     if (!s?.narration) throw new HttpError(400, "Write the narration first.");
     return json(
       {
-        job: enqueue(
+        job: await queue(
           id,
           "narrate",
           {
@@ -547,10 +631,10 @@ async function dispatch(req: Request, p: string[]): Promise<Response> {
     const b = z.object({ revision: z.number().int() }).parse(await body(req));
     if (b.revision !== current.revision)
       throw new HttpError(409, "Save before exporting.");
-    validateRender(id, current.draft);
+    await validateRender(id, current.draft);
     return json(
       {
-        job: enqueue(
+        job: await queue(
           id,
           "render",
           { draft: current.draft, revision: current.revision },
@@ -571,15 +655,22 @@ async function dispatch(req: Request, p: string[]): Promise<Response> {
     const archive = new ZipArchive({ zlib: { level: 1 } });
     archive.append(
       JSON.stringify(
-        { version: 1, project: current, assets: assets(id), takes: takes(id) },
+        {
+          version: 1,
+          project: current,
+          assets: await assets(id),
+          takes: await takes(id),
+        },
         null,
         2,
       ),
       { name: "project.json" },
     );
-    for (const a of assets(id))
-      archive.file(assetPath(a), { name: `assets/${a.path}` });
-    archive.finalize();
+    for (const a of await assets(id))
+      archive.append(await readAsset(a), {
+        name: `assets/${path.basename(a.path)}`,
+      });
+    void archive.finalize();
     return new Response(Readable.toWeb(archive) as ReadableStream<Uint8Array>, {
       headers: {
         "Content-Type": "application/zip",
@@ -587,62 +678,30 @@ async function dispatch(req: Request, p: string[]): Promise<Response> {
       },
     });
   }
-  if (p[2] === "events" && method === "GET") {
-    let cursor = Number(
-        req.headers.get("last-event-id") ||
-          new URL(req.url).searchParams.get("after") ||
-          0,
-      ),
-      timer: ReturnType<typeof setInterval>;
-    const encoder = new TextEncoder();
-    const stream = new ReadableStream<Uint8Array>({
-      start(controller) {
-        const send = () => {
-          const rows = db
-            .prepare(
-              "SELECT * FROM events WHERE projectId=? AND id>? ORDER BY id LIMIT 50",
-            )
-            .all(id, cursor) as any[];
-          try {
-            if (!rows.length)
-              controller.enqueue(encoder.encode(": keepalive\n\n"));
-            for (const r of rows) {
-              controller.enqueue(
-                encoder.encode(
-                  `id: ${r.id}\ndata: ${JSON.stringify({ type: r.type, ...JSON.parse(r.data) })}\n\n`,
-                ),
-              );
-              cursor = Number(r.id);
-            }
-          } catch {
-            clearInterval(timer);
-          }
-        };
-        send();
-        timer = setInterval(send, 1500);
-        req.signal.addEventListener(
-          "abort",
-          () => {
-            clearInterval(timer);
-            try {
-              controller.close();
-            } catch {}
-          },
-          { once: true },
-        );
-      },
-      cancel() {
-        clearInterval(timer);
-      },
+  if (p[2] === "events" && method === "GET")
+    return json({
+      events: await db
+        .prepare(
+          "SELECT * FROM events WHERE projectId=? AND id>? ORDER BY id LIMIT 50",
+        )
+        .all(id, Number(new URL(req.url).searchParams.get("after") || 0)),
     });
-    return new Response(stream, {
-      headers: {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        Connection: "keep-alive",
-        "X-Accel-Buffering": "no",
-      },
-    });
+  if (p[2] === "archive" && method === "POST") {
+    await db
+      .prepare(
+        "INSERT INTO project_archive VALUES(?,?) ON CONFLICT(projectId) DO NOTHING",
+      )
+      .run(id, new Date().toISOString());
+    return json({ archived: true });
+  }
+  if (p[2] === "unarchive" && method === "POST") {
+    await db.prepare("DELETE FROM project_archive WHERE projectId=?").run(id);
+    return json({ archived: false });
   }
   throw new HttpError(404, "Endpoint not found.");
+}
+async function queue(...args: Parameters<typeof enqueue>) {
+  const job = await enqueue(...args);
+  await dispatchJob(job.id);
+  return job;
 }

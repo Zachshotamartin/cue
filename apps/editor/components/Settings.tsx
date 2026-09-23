@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { Check, Key, ArrowUpRight } from "@phosphor-icons/react";
+import { AccountSettings } from "./AccountSettings";
 import { api } from "./client-api";
 const providers = [
   {
@@ -55,7 +56,7 @@ export function Settings() {
       });
       setStatus(x.providers);
       setMessage(
-        "Saved key removed. Environment credentials, if configured, remain under your control.",
+        "Saved key removed. New jobs cannot use this provider until you add a key.",
       );
     } catch (e: any) {
       setMessage(e.message);
@@ -66,9 +67,10 @@ export function Settings() {
       <p className="eyebrow">Your connections</p>
       <h1>Bring your creative tools.</h1>
       <p className="reading-lede">
-        Connect only what you need. Capturing, editing and local exports work
-        without an AI key.
+        Connect only what you need. Capturing, editing and exports work without
+        an AI key.
       </p>
+      <AccountSettings />
       {message && (
         <p className="notice" role="status">
           {message}
@@ -131,8 +133,8 @@ export function Settings() {
       <aside className="privacy-note">
         <h3>Private by design.</h3>
         <p>
-          Keys are encrypted at rest and used only by the local worker. They
-          never appear in a project archive or reach the capture extension.
+          Keys are encrypted at rest and used only by Cue’s server-side jobs.
+          They never appear in a project archive or reach the capture extension.
           Provider requests are sent only when you choose an AI operation.
         </p>
       </aside>

@@ -1,3 +1,4 @@
+import { vi } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -11,3 +12,8 @@ for (const key of [
 ])
   delete process.env[key];
 fs.mkdirSync(process.env.CUE_DATA_DIR, { recursive: true });
+
+process.env.CUE_SIGNING_SECRET = "34".repeat(32);
+delete process.env.DATABASE_URL;
+delete process.env.VERCEL;
+delete process.env.BLOB_READ_WRITE_TOKEN;

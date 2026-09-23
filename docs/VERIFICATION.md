@@ -1,3 +1,15 @@
+# Production upgrade verification — September 23, 2026
+
+Current implementation: 40 automated checks pass (account isolation, verified-key requirements, persistence/revisions, concurrent saves and claims, spending/idempotency, credential encryption, upload integrity, provider HTTP contracts, job recovery and recording storage). These use an isolated database adapter and mocked managed-auth sessions; they are not a claim of a live Neon authentication test.
+
+TypeScript and the optimized Next.js + Workflow build pass. Production dependency audit: zero known vulnerabilities after pinning patched transitive packages. Vercel project and private Blob store have been created. Encryption, session-signing, worker-signing, cron and Blob secrets are configured as sensitive production env values.
+
+**Outstanding external gate:** Vercel requires the account holder to accept Neon's marketplace terms before the database and managed authentication can be provisioned. Consequently live sign-up/email delivery, cross-browser cloud persistence, local-project import, deployed Workflow/Sandbox rendering and real paid provider execution have not yet been verified. Runway/Gemini/ElevenLabs keys are supplied by each user after sign-in. The Chrome authenticated capture test is postponed at the user's request.
+
+The historical evidence below is from the original local prototype and does not certify the account-based cloud release.
+
+---
+
 # Verification — 23 September 2026
 
 Cue is implemented as a private local application. This report separates completed checks from external integrations that still need a live account or browser permission.

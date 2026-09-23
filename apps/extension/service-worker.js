@@ -371,10 +371,26 @@ chrome.runtime.onMessage.addListener((m, sender, reply) => {
       case "PAIR": {
         const server = new URL(m.server);
         if (
-          !["127.0.0.1", "localhost"].includes(server.hostname) ||
-          server.protocol !== "http:"
+          !(
+            server.protocol === "https:" ||
+            (server.protocol === "http:" &&
+              ["127.0.0.1", "localhost"].includes(server.hostname))
+          ) ||
+          server.username ||
+          server.password
         )
-          throw new Error("Use your local Cue address.");
+          throw new Error(
+            "Use an HTTPS Cue address, or localhost for development.",
+          );
+        if (
+          server.protocol === "https:" &&
+          !(await chrome.permissions.contains({
+            origins: [`${server.origin}/*`],
+          }))
+        )
+          throw new Error(
+            "Allow Cue Capture to connect to this Cue address first.",
+          );
         const r = await fetch(`${server.origin}/api/pairing/exchange`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },

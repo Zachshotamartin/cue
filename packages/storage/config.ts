@@ -15,18 +15,32 @@ function findRoot() {
     if (parent === at) break;
     at = parent;
   }
-  throw new Error("Run Cue from its project directory or set CUE_ROOT.");
+  return process.cwd();
 }
 export const root = process.env.CUE_ROOT || findRoot();
-try {
-  process.loadEnvFile(path.join(root, ".env"));
-} catch {}
-export const dataDir = path.resolve(root, process.env.CUE_DATA_DIR || ".data");
-export const origin = process.env.CUE_ORIGIN || "http://127.0.0.1:5303";
+if (!process.env.VERCEL && process.env.NODE_ENV !== "test") {
+  for (const name of [".env.local", ".env"]) {
+    try {
+      process.loadEnvFile(path.join(/* turbopackIgnore: true */ root, name));
+    } catch {}
+  }
+}
+export const cloud = !!process.env.DATABASE_URL;
+export const dataDir = process.env.VERCEL
+  ? "/tmp/cue"
+  : path.resolve(root, process.env.CUE_DATA_DIR || ".data");
+export const origin =
+  process.env.CUE_ORIGIN ||
+  (process.env.VERCEL_ENV === "preview" && process.env.VERCEL_URL
+    ? `https://${process.env.VERCEL_URL}`
+    : process.env.VERCEL_PROJECT_PRODUCTION_URL
+      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+      : "http://127.0.0.1:5303");
 export const port = Number(process.env.CUE_PORT || 5303);
-fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
-fs.mkdirSync(path.join(dataDir, "assets"), { recursive: true });
 export function localSecret(name: string, bytes = 32) {
+  if (process.env.VERCEL)
+    throw new Error("Local secrets are disabled in production.");
+  fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
   const file = path.join(/* turbopackIgnore: true */ dataDir, name);
   try {
     fs.writeFileSync(file, crypto.randomBytes(bytes).toString("hex"), {
@@ -38,15 +52,34 @@ export function localSecret(name: string, bytes = 32) {
   }
   return fs.readFileSync(/* turbopackIgnore: true */ file, "utf8").trim();
 }
-export const sessionSecret = localSecret("session.key");
 export function safeEqual(a: string, b: string) {
   const x = Buffer.from(a),
     y = Buffer.from(b);
   return x.length === y.length && crypto.timingSafeEqual(x, y);
 }
-export function assetSignature(id: string) {
-  return crypto
-    .createHmac("sha256", sessionSecret)
-    .update(`asset:${id}`)
+function signingKey() {
+  if (process.env.CUE_SIGNING_SECRET) return process.env.CUE_SIGNING_SECRET;
+  if (process.env.NODE_ENV === "test" || process.env.CUE_LOCAL_DATABASE === "1")
+    return localSecret("session.key");
+  throw new Error("CUE_SIGNING_SECRET is required.");
+}
+export function assetSignature(
+  id: string,
+  expires = Math.floor(Date.now() / 1000) + 3600,
+) {
+  const mac = crypto
+    .createHmac("sha256", signingKey())
+    .update(`asset:${id}:${expires}`)
     .digest("hex");
+  return `${expires}.${mac}`;
+}
+export function validAssetSignature(id: string, signature: string) {
+  const [until] = signature.split(".");
+  const n = Number(until);
+  return (
+    Number.isSafeInteger(n) &&
+    n >= Date.now() / 1000 &&
+    n <= Date.now() / 1000 + 7200 &&
+    safeEqual(signature, assetSignature(id, n))
+  );
 }

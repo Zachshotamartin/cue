@@ -14,8 +14,18 @@
     "offscreen"
   ],
   "host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
-  "background": { "service_worker": "service-worker.js", "type": "module" },
-  "action": { "default_title": "Capture with Cue" },
-  "side_panel": { "default_path": "panel.html" },
-  "icons": { "128": "icon.png" }
+  "background": {
+    "service_worker": "service-worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Capture with Cue"
+  },
+  "side_panel": {
+    "default_path": "panel.html"
+  },
+  "icons": {
+    "128": "icon.png"
+  },
+  "optional_host_permissions": ["https://*/*"]
 }

@@ -1,42 +1,31 @@
-# Current security and storage model
+# Cue security boundaries
 
-Cue is an owner-only local application. It is **not a hosted multi-user service** and its local browser session is not a user-account login.
+The account-based release is being implemented. See PRODUCTION_PLAN.md and VERIFICATION.md for deployment gates and checks; do not mistake source code for verified infrastructure.
 
-## Why there is no login screen
+## Accounts and authorization
 
-The supported start commands bind the web server to `127.0.0.1`. Opening a Cue page issues an HttpOnly, SameSite=Strict cookie for the local installation. API writes also check the request origin and configured Host. These controls restrict website-origin requests; they do not authenticate one person against another person using this computer.
+Neon managed authentication validates sessions. Protected pages redirect to sign-in; every API also validates the session and resolves the project owner before reading or writing its assets, jobs, revisions, captures or keys. Visiting a URL no longer creates an account or issues an installation-wide credential. Server-side mutation origin checks are independent of UI redirects. Verified email is required for provider keys and billable operations.
 
-Anyone who can use an authorized local browser session can operate Cue, including spending through configured provider keys. Local processes or a person with access to the Cue data directory may also obtain the installation credential. Do not expose this version through a public interface or tunnel. Hosted use needs real authentication and tenant authorization first.
+## Provider credentials
 
-## What is encrypted
+User keys are AES-256-GCM encrypted in Postgres with a fresh 96-bit nonce and an authenticated owner/provider/version context. The 256-bit master key is a Vercel sensitive server environment value, separate from the database. Status responses return only the provider name, configured state and suffix. No production fallback uses the operator's keys. Cue's server necessarily decrypts a key to call its provider; this is encrypted storage, not end-to-end encryption. Do not claim protection from a compromised application server with access to its master key.
 
-Keys entered in Settings are encrypted before database storage using AES-256-GCM, with a fresh random nonce and owner/provider/version bound as authenticated data. The 32-byte master key is supplied through `CUE_MASTER_KEY` or created in `.data/encryption.key` with mode `0600`. `.data` is created with mode `0700`. The UI receives only configured status and the final four characters, not the saved full key. The extension and project ZIP do not receive provider keys.
+Keep an encrypted offline copy of CUE_MASTER_KEY under the operator's control. Losing it requires users to enter keys again. Rotation must decrypt/re-encrypt rows in a controlled migration before retiring the previous key. Never overwrite the key on a deployment and silently break users' connections.
 
-The worker decrypts a key in memory when making an authorized provider request. The key and the data selected for that operation go to that provider over HTTPS. Encryption at rest does **not** protect against compromise of the computer, the account, or both the database and its master key. The local master key is a file, not an OS Keychain or hardware-backed secret.
+## Media and capture
 
-A key placed in `.env` is **plain text**. Environment variables are an alternative source and are not re-encrypted automatically. Prefer Settings for encrypted local storage. Projects, screenshot/video/audio files, and exports are not application-encrypted.
+Private Vercel Blob stores captures, upload chunks and outputs. Asset routes authenticate the owner; isolated renderers receive expiring asset capabilities. Capabilities expire and do not grant project or credential access. User cookies from captured websites stay in the browser extension. Pairing codes are hashed, single-use, expire after ten minutes, and grant only a 24-hour capture token for one project. Tokens can be revoked in the editor.
 
-## How saving works
+Uploads are bounded, checksum-checked, content-inspected and normalized. Extension screenshot masking is not a promise of perfect redaction. Recordings still require the user's review before upload. Website auth cookies, session storage and raw DOM state are not imported.
 
-- `.data/cue.sqlite`: projects, immutable saved revisions, job state, asset metadata, encrypted provider credentials, pairing codes and capture-token hashes. SQLite WAL is enabled.
-- `.data/assets/`: imported captures/audio, generated takes, posters and exports.
-- Chrome extension IndexedDB: captures and recording chunks awaiting review/upload; this is separate from Cue's server files.
-- Chrome extension local storage: project pairing and capture progress; project-limited tokens expire after 24 hours.
+## Jobs and spending
 
-Use **Save** for edits; navigation through Cue's editor header saves pending changes first. Capture uploads and completed jobs persist immediately. Closing a tab does not remove saved data. Unsaved edits are not the same as a saved revision. Back up the entire `.data` directory while Cue is stopped, including its key files; losing the encryption key makes saved API keys unreadable.
+Each request carries an idempotency key; immutable inputs, budget reservation and job creation are committed together. Known provider task IDs are polled after interruption. Uncertain submissions are not automatically repeated. The user must reconcile provider billing first. Server-side job claims prevent duplicate delivery from executing a provider call twice. Cloud rendering runs in a bounded Sandbox with a job-scoped callback token and no provider keys or database credentials.
 
-## GitHub and hosting at this check
+The initial service limits accounts to 100 projects, 1 GiB of media, three active jobs, and five cloud exports/hour. Provider charges use the user's own account. These limits do not constitute a paid billing product.
 
-On 23 September 2026 the Cue checkout has a local Git commit on `feature/cue` and no configured Git remote. No GitHub push or Cue Vercel deployment has been performed by this task. No `.vercel` link exists. `.env` and `.data/` are excluded from Git; `.env.example` contains empty provider values. No provider keys are configured in this installation.
+## Operations
 
-Saving a key in local Settings does not upload it to Vercel or GitHub. A future hosted system would keep service secrets server-side and encrypt per-user provider keys in a tenant-scoped database with a separately managed master key. It must never silently use the owner's keys for other users.
+Keep production and development databases/stores separate. Do not put production secrets in preview branches or Git. Vercel deployment protection does not replace application authentication. Do not log full requests to the key endpoints, provider bodies, signed media URLs or callback tokens. The local SQLite adapter is explicitly opt-in outside tests and cannot be used on Vercel as durable storage.
 
-## Obtain provider keys
-
-Create keys in the provider's own website, then paste them into Cue's local `/settings` page. Do not put secrets into a Git commit or a chat message.
-
-- **Runway:** open https://dev.runwayml.com/; create/select an organization, open API Keys, and create a key named Cue. The organization needs API credits. Instructions: https://docs.dev.runwayml.com/guides/setup/
-- **Gemini:** open https://aistudio.google.com/apikey; create/select a Google Cloud project and create an API key. Use the current key type offered by AI Studio; set billing/quota controls for the chosen model. Instructions: https://ai.google.dev/gemini-api/docs/api-key
-- **ElevenLabs:** open the workspace, select Developers → API Keys, and create a restricted key named Cue. Enable text-to-speech for the current integration and set a credit limit. Music and sound-effect generation are not wired into Cue yet. Instructions: https://elevenlabs.io/docs/help-center/technical/how-do-i-authorize-myself-using-an-api-key
-
-Configuring a key does not itself generate media. Live tests still need an agreed spending limit before paid requests.
+Account export is available through project ZIP/MP4/SRT downloads. Archive is reversible; media retention is intentional. The original local .data directory is preserved by the import script. Database restore retention depends on the actual Neon plan and must be verified in its console; a free plan is not an independent backup strategy.

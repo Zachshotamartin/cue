@@ -32,10 +32,10 @@ export async function renderFilm(job: Job) {
   if (!draft.shots.length) throw new Error("Add scenes before exporting.");
   const inputProps = {
     draft,
-    assets: assets(job.projectId),
-    takes: takes(job.projectId),
+    assets: await assets(job.projectId),
+    takes: await takes(job.projectId),
     urls: Object.fromEntries(
-      assets(job.projectId).map((a) => [
+      (await assets(job.projectId)).map((a) => [
         a.id,
         `${origin}/api/assets/${a.id}?signature=${assetSignature(a.id)}`,
       ]),
@@ -57,8 +57,8 @@ export async function renderFilm(job: Job) {
   });
   const output = path.join(dataDir, `render-${job.id}.mp4`);
   const { cancel, cancelSignal } = makeCancelSignal();
-  const check = setInterval(() => {
-    if (getJob(job.id).cancelRequested) cancel();
+  const check = setInterval(async () => {
+    if ((await getJob(job.id)).cancelRequested) cancel();
   }, 1000);
   try {
     await renderMedia({
@@ -72,10 +72,10 @@ export async function renderFilm(job: Job) {
       browserExecutable: executable,
       cancelSignal,
       crf: 20,
-      onProgress: ({ progress }) => {
-        const j = getJob(job.id);
+      onProgress: async ({ progress }) => {
+        const j = await getJob(job.id);
         if (Math.round(progress * 90) > j.progress)
-          updateJob(j, {
+          await updateJob(j, {
             progress: Math.round(progress * 90),
             leaseUntil: Date.now() + 60000,
           });

@@ -1,7 +1,4 @@
-import { DatabaseSync } from "node:sqlite";
-import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { dataDir } from "./config";
 import {
   defaultDraft,
   draftSchema,
@@ -13,56 +10,43 @@ import {
   type Draft,
 } from "../contracts";
 
-export const db = new DatabaseSync(path.join(dataDir, "cue.sqlite"));
-db.exec(
-  "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;",
-);
-db.exec(`
-CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY, owner TEXT NOT NULL, revision INTEGER NOT NULL, draft TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS revisions (projectId TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, revision INTEGER NOT NULL, draft TEXT NOT NULL, label TEXT NOT NULL, createdAt TEXT NOT NULL, PRIMARY KEY(projectId,revision));
-CREATE TABLE IF NOT EXISTS assets (id TEXT PRIMARY KEY, projectId TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, data TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, projectId TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, state TEXT NOT NULL, leaseUntil INTEGER NOT NULL DEFAULT 0, data TEXT NOT NULL, idem TEXT NOT NULL, UNIQUE(projectId,idem));
-CREATE TABLE IF NOT EXISTS takes (id TEXT PRIMARY KEY, projectId TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, data TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, projectId TEXT NOT NULL, type TEXT NOT NULL, data TEXT NOT NULL, createdAt TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS credentials (owner TEXT NOT NULL, provider TEXT NOT NULL, encrypted TEXT NOT NULL, suffix TEXT NOT NULL, updatedAt TEXT NOT NULL, PRIMARY KEY(owner,provider));
-CREATE TABLE IF NOT EXISTS pairing (code TEXT PRIMARY KEY, projectId TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, expiresAt INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS capture_tokens (tokenHash TEXT PRIMARY KEY, projectId TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, expiresAt INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS uploads (id TEXT PRIMARY KEY, projectId TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, data TEXT NOT NULL, createdAt INTEGER NOT NULL);
-CREATE INDEX IF NOT EXISTS events_project ON events(projectId,id);
-CREATE INDEX IF NOT EXISTS jobs_state ON jobs(state,leaseUntil);
-`);
+export { db, tx } from "./client";
+import { db, tx, rowLock, lockAccount } from "./client";
 export const now = () => new Date().toISOString();
-export function tx<T>(fn: () => T): T {
-  db.exec("BEGIN IMMEDIATE");
-  try {
-    const r = fn();
-    db.exec("COMMIT");
-    return r;
-  } catch (e) {
-    db.exec("ROLLBACK");
-    throw e;
-  }
+export async function event(
+  projectId: string,
+  type: string,
+  data: unknown = {},
+) {
+  await db
+    .prepare(
+      "INSERT INTO events(projectId,type,data,createdAt) VALUES(?,?,?,?)",
+    )
+    .run(projectId, type, JSON.stringify(data), now());
 }
-export function event(projectId: string, type: string, data: unknown = {}) {
-  db.prepare(
-    "INSERT INTO events(projectId,type,data,createdAt) VALUES(?,?,?,?)",
-  ).run(projectId, type, JSON.stringify(data), now());
-}
-export function project(id: string, owner = "local"): Project {
-  const r: any = db
-    .prepare("SELECT * FROM projects WHERE id=? AND owner=?")
-    .get(id, owner);
+export async function project(id: string, owner?: string): Promise<Project> {
+  const r: any = await db
+    .prepare(
+      "SELECT * FROM projects WHERE id=?" +
+        (owner ? " AND owner=?" : "") +
+        rowLock(),
+    )
+    .get(...(owner ? [id, owner] : [id]));
   if (!r) throw new Error("Project not found.");
   return { ...r, draft: draftSchema.parse(JSON.parse(r.draft)) };
 }
-export function projects(owner = "local"): Project[] {
+export async function projects(owner = "local"): Promise<Project[]> {
   return (
-    db
+    (await db
       .prepare("SELECT * FROM projects WHERE owner=? ORDER BY updatedAt DESC")
-      .all(owner) as any[]
+      .all(owner)) as any[]
   ).map((r) => ({ ...r, draft: draftSchema.parse(JSON.parse(r.draft)) }));
 }
-export function createProject(title: string, siteUrl = "", owner = "local") {
+export async function createProject(
+  title: string,
+  siteUrl = "",
+  owner = "local",
+) {
   const p: Project = {
     id: randomUUID(),
     owner,
@@ -71,92 +55,92 @@ export function createProject(title: string, siteUrl = "", owner = "local") {
     createdAt: now(),
     updatedAt: now(),
   };
-  tx(() => {
-    db.prepare("INSERT INTO projects VALUES(?,?,?,?,?,?)").run(
-      p.id,
-      p.owner,
-      1,
-      JSON.stringify(p.draft),
-      p.createdAt,
-      p.updatedAt,
-    );
-    db.prepare("INSERT INTO revisions VALUES(?,?,?,?,?)").run(
-      p.id,
-      1,
-      JSON.stringify(p.draft),
-      "Create project",
-      p.createdAt,
-    );
-    event(p.id, "project.created");
+  await tx(async () => {
+    await db
+      .prepare("INSERT INTO projects VALUES(?,?,?,?,?,?)")
+      .run(p.id, p.owner, 1, JSON.stringify(p.draft), p.createdAt, p.updatedAt);
+    await db
+      .prepare("INSERT INTO revisions VALUES(?,?,?,?,?)")
+      .run(p.id, 1, JSON.stringify(p.draft), "Create project", p.createdAt);
+    await event(p.id, "project.created");
   });
   return p;
 }
-export function assets(id: string): Asset[] {
+export async function assets(id: string): Promise<Asset[]> {
   return (
-    db.prepare("SELECT data FROM assets WHERE projectId=?").all(id) as any[]
+    (await db
+      .prepare("SELECT data FROM assets WHERE projectId=?")
+      .all(id)) as any[]
   ).map((r) => JSON.parse(r.data));
 }
-export function getAsset(id: string): Asset {
-  const r: any = db.prepare("SELECT data FROM assets WHERE id=?").get(id);
+export async function getAsset(id: string): Promise<Asset> {
+  const r: any = await db.prepare("SELECT data FROM assets WHERE id=?").get(id);
   if (!r) throw new Error("Asset not found.");
   return JSON.parse(r.data);
 }
-export function addAsset(asset: Asset) {
-  db.prepare("INSERT INTO assets VALUES(?,?,?)").run(
-    asset.id,
-    asset.projectId,
-    JSON.stringify(asset),
-  );
-  event(asset.projectId, "asset.added", { id: asset.id });
+export async function addAsset(asset: Asset) {
+  await db
+    .prepare("INSERT INTO assets VALUES(?,?,?)")
+    .run(asset.id, asset.projectId, JSON.stringify(asset));
+  await event(asset.projectId, "asset.added", { id: asset.id });
 }
-export function jobs(id: string): Job[] {
+export async function jobs(id: string): Promise<Job[]> {
   return (
-    db
-      .prepare(
-        "SELECT data FROM jobs WHERE projectId=? ORDER BY rowid DESC LIMIT 100",
-      )
-      .all(id) as any[]
-  ).map((r) => JSON.parse(r.data));
+    (await db
+      .prepare("SELECT data FROM jobs WHERE projectId=? ORDER BY data DESC")
+      .all(id)) as any[]
+  )
+    .map((r) => JSON.parse(r.data))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
-export function getJob(id: string): Job {
-  const r: any = db.prepare("SELECT data FROM jobs WHERE id=?").get(id);
+export async function getJob(id: string): Promise<Job> {
+  const r: any = await db
+    .prepare("SELECT data FROM jobs WHERE id=?" + rowLock())
+    .get(id);
   if (!r) throw new Error("Job not found.");
   return JSON.parse(r.data);
 }
-export function updateJob(job: Job, patch: Partial<Job>) {
-  const next = { ...getJob(job.id), ...patch, updatedAt: now() };
-  db.prepare("UPDATE jobs SET state=?,leaseUntil=?,data=? WHERE id=?").run(
-    next.state,
-    next.leaseUntil,
-    JSON.stringify(next),
-    next.id,
-  );
-  event(next.projectId, "job.updated", {
-    id: next.id,
-    state: next.state,
-    progress: next.progress,
+export async function updateJob(job: Job, patch: Partial<Job>) {
+  return tx(async () => {
+    const next = { ...(await getJob(job.id)), ...patch, updatedAt: now() };
+    await db
+      .prepare("UPDATE jobs SET state=?,leaseUntil=?,data=? WHERE id=?")
+      .run(next.state, next.leaseUntil, JSON.stringify(next), next.id);
+    await event(next.projectId, "job.updated", {
+      id: next.id,
+      state: next.state,
+      progress: next.progress,
+    });
+    return next;
   });
-  return next;
 }
-export function budget(id: string) {
+export async function budget(id: string) {
   const all = (
-    db.prepare("SELECT data FROM jobs WHERE projectId=?").all(id) as any[]
+    (await db
+      .prepare("SELECT data FROM jobs WHERE projectId=?")
+      .all(id)) as any[]
   ).map((r) => JSON.parse(r.data) as Job);
   return {
     spent: all.reduce((n, j) => n + j.chargedCents, 0),
     reserved: all.reduce((n, j) => n + j.reservedCents, 0),
-    limit: project(id).draft.budgetCents,
+    limit: (await project(id)).draft.budgetCents,
   };
 }
-export function enqueue(
+export async function enqueue(
   id: string,
   kind: Job["kind"],
   payload: Job["payload"],
   idem: string,
   reservedCents = 0,
 ) {
-  return tx(() => {
-    const previous: any = db
+  return await tx(async () => {
+    const identity = await db
+      .prepare("SELECT owner FROM projects WHERE id=?")
+      .get(id);
+    if (!identity) throw new Error("Project not found.");
+    await lockAccount(identity.owner);
+    const ownerProject = await project(id); // Locks the budget and idempotency namespace.
+    const previous: any = await db
       .prepare("SELECT data FROM jobs WHERE projectId=? AND idem=?")
       .get(id, idem);
     if (previous) {
@@ -176,7 +160,24 @@ export function enqueue(
         );
       return prior;
     }
-    const b = budget(id);
+    const active = (await accountJobs(ownerProject.owner)).filter(
+      (j) => !["completed", "failed", "cancelled", "unknown"].includes(j.state),
+    );
+    if (active.length >= 3)
+      throw new Error("Wait for one of your three active jobs to finish.");
+    const recent = (await accountJobs(ownerProject.owner)).filter(
+      (j) =>
+        j.kind === "render" && Date.now() - Date.parse(j.createdAt) < 3600000,
+    );
+    if (kind === "render" && recent.length >= 5)
+      throw new Error(
+        "Cloud exports are limited to five per hour per account. Your edits are saved.",
+      );
+    if ((await projectStorage(ownerProject.owner)) > 900 * 1048576)
+      throw new Error(
+        "Your account is close to its 1 GiB media limit. Export and remove unused media before generating more.",
+      );
+    const b = await budget(id);
     if (b.spent + b.reserved + reservedCents > b.limit)
       throw new Error("This job exceeds the project spending limit.");
     const job: Job = {
@@ -196,29 +197,24 @@ export function enqueue(
       createdAt: now(),
       updatedAt: now(),
     };
-    db.prepare("INSERT INTO jobs VALUES(?,?,?,?,?,?)").run(
-      job.id,
-      id,
-      job.state,
-      0,
-      JSON.stringify(job),
-      idem,
-    );
-    event(id, "job.queued", { id: job.id });
+    await db
+      .prepare("INSERT INTO jobs VALUES(?,?,?,?,?,?)")
+      .run(job.id, id, job.state, 0, JSON.stringify(job), idem);
+    await event(id, "job.queued", { id: job.id });
     return job;
   });
 }
-export function claimJob(): Job | null {
-  return tx(() => {
-    const row: any = db
+export async function claimJob(): Promise<Job | null> {
+  return await tx(async () => {
+    const row: any = await db
       .prepare(
-        "SELECT data FROM jobs WHERE state IN ('queued','running','retrieving','submitting') AND leaseUntil<? ORDER BY rowid LIMIT 1",
+        "SELECT data FROM jobs WHERE state IN ('queued','running','retrieving','submitting') AND leaseUntil<? ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED",
       )
       .get(Date.now());
     if (!row) return null;
     const j: Job = JSON.parse(row.data);
     if (j.state === "submitting" && !j.providerTaskId) {
-      updateJob(j, {
+      await updateJob(j, {
         state: "unknown",
         error:
           "Submission was interrupted before a provider task ID was saved. Check provider billing before retrying.",
@@ -226,28 +222,30 @@ export function claimJob(): Job | null {
       });
       return null;
     }
-    return updateJob(j, { leaseUntil: Date.now() + 60000 });
+    return await updateJob(j, { leaseUntil: Date.now() + 60000 });
   });
 }
-export function takes(id: string): Take[] {
+export async function takes(id: string): Promise<Take[]> {
   return (
-    db.prepare("SELECT data FROM takes WHERE projectId=?").all(id) as any[]
+    (await db
+      .prepare("SELECT data FROM takes WHERE projectId=?")
+      .all(id)) as any[]
   ).map((r) => JSON.parse(r.data));
 }
-export function addTake(take: Take) {
-  const existing = takes(take.projectId).find((t) => t.jobId === take.jobId);
-  if (existing) return existing;
-  db.prepare("INSERT INTO takes VALUES(?,?,?)").run(
-    take.id,
-    take.projectId,
-    JSON.stringify(take),
+export async function addTake(take: Take) {
+  const existing = (await takes(take.projectId)).find(
+    (t) => t.jobId === take.jobId,
   );
-  event(take.projectId, "take.added", { id: take.id });
+  if (existing) return existing;
+  await db
+    .prepare("INSERT INTO takes VALUES(?,?,?)")
+    .run(take.id, take.projectId, JSON.stringify(take));
+  await event(take.projectId, "take.added", { id: take.id });
   return take;
 }
-export function validateReferences(id: string, draft: Draft) {
-  const owned = new Map(assets(id).map((a) => [a.id, a]));
-  const knownTakes = new Map(takes(id).map((t) => [t.id, t]));
+export async function validateReferences(id: string, draft: Draft) {
+  const owned = new Map((await assets(id)).map((a) => [a.id, a]));
+  const knownTakes = new Map((await takes(id)).map((t) => [t.id, t]));
   const ids = draft.shots.map((s) => s.id);
   if (new Set(ids).size !== ids.length)
     throw new Error("Scene IDs must be unique.");
@@ -289,60 +287,56 @@ export function validateReferences(id: string, draft: Draft) {
   if (draft.shots.reduce((n, s) => n + s.duration, 0) > 300)
     throw new Error("Films are limited to five minutes.");
 }
-export function editProject(
+export async function editProject(
   id: string,
   expectedRevision: number,
   raw: unknown,
   label = "Edit project",
 ) {
   const draft = draftSchema.parse(raw);
-  return tx(() => {
-    const p = project(id);
+  return await tx(async () => {
+    const p = await project(id);
     if (p.revision !== expectedRevision)
       throw new Error(
         "Revision conflict. Reload the latest project before saving.",
       );
-    validateReferences(id, draft);
+    await validateReferences(id, draft);
     const r = p.revision + 1,
       at = now();
-    db.prepare(
-      "UPDATE projects SET revision=?,draft=?,updatedAt=? WHERE id=?",
-    ).run(r, JSON.stringify(draft), at, id);
-    db.prepare("INSERT INTO revisions VALUES(?,?,?,?,?)").run(
-      id,
-      r,
-      JSON.stringify(draft),
-      label,
-      at,
-    );
-    event(id, "project.updated", { revision: r });
-    return project(id);
+    await db
+      .prepare("UPDATE projects SET revision=?,draft=?,updatedAt=? WHERE id=?")
+      .run(r, JSON.stringify(draft), at, id);
+    await db
+      .prepare("INSERT INTO revisions VALUES(?,?,?,?,?)")
+      .run(id, r, JSON.stringify(draft), label, at);
+    await event(id, "project.updated", { revision: r });
+    return await project(id);
   });
 }
-export function snapshot(id: string): Snapshot {
-  const cursor: any = db
+export async function snapshot(id: string): Promise<Snapshot> {
+  const cursor: any = await db
     .prepare("SELECT MAX(id) AS n FROM events WHERE projectId=?")
     .get(id);
   return {
-    project: project(id),
-    assets: assets(id),
-    jobs: jobs(id),
-    takes: takes(id),
-    revisions: db
+    project: await project(id),
+    assets: await assets(id),
+    jobs: await jobs(id),
+    takes: await takes(id),
+    revisions: (await db
       .prepare(
         "SELECT revision,label,createdAt FROM revisions WHERE projectId=? ORDER BY revision DESC LIMIT 100",
       )
-      .all(id) as any,
-    budget: budget(id),
+      .all(id)) as any,
+    budget: await budget(id),
     eventsCursor: Number(cursor.n || 0),
   };
 }
 
-export function validateRender(id: string, draft: Draft) {
-  validateReferences(id, draft);
+export async function validateRender(id: string, draft: Draft) {
+  await validateReferences(id, draft);
   if (!draft.shots.length) throw new Error("Add scenes before exporting.");
-  const owned = new Map(assets(id).map((a) => [a.id, a]));
-  const knownTakes = new Map(takes(id).map((t) => [t.id, t]));
+  const owned = new Map((await assets(id)).map((a) => [a.id, a]));
+  const knownTakes = new Map((await takes(id)).map((t) => [t.id, t]));
   for (const s of draft.shots) {
     if (!s.assetId && s.template !== "endcard")
       throw new Error(`Choose a source for “${s.title}”.`);
@@ -378,4 +372,43 @@ export function validateRender(id: string, draft: Draft) {
         );
     }
   }
+}
+
+export async function claimSpecificJob(id: string) {
+  return tx(async () => {
+    const job = await getJob(id);
+    if (
+      ["completed", "failed", "cancelled", "unknown"].includes(job.state) ||
+      job.leaseUntil > Date.now()
+    )
+      return null;
+    if (job.state === "submitting" && !job.providerTaskId) {
+      await updateJob(job, {
+        state: "unknown",
+        leaseUntil: 0,
+        error:
+          "Submission was interrupted before confirmation. Check provider history before retrying.",
+      });
+      return null;
+    }
+    return updateJob(job, { leaseUntil: Date.now() + 300000 });
+  });
+}
+
+export async function projectStorage(owner: string) {
+  const rows = await db
+    .prepare(
+      "SELECT a.data FROM assets a JOIN projects p ON p.id=a.projectId WHERE p.owner=?",
+    )
+    .all(owner);
+  return rows.reduce((n, r) => n + Number(JSON.parse(r.data).bytes || 0), 0);
+}
+export async function accountJobs(owner: string) {
+  return (
+    await db
+      .prepare(
+        "SELECT j.data FROM jobs j JOIN projects p ON p.id=j.projectId WHERE p.owner=?",
+      )
+      .all(owner)
+  ).map((r) => JSON.parse(r.data) as Job);
 }

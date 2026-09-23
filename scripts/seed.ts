@@ -9,13 +9,13 @@ import {
 } from "../packages/storage/db";
 import { importMedia } from "../packages/storage/media";
 import { starterStoryboard } from "../packages/director";
-const existing = projects().find(
+const existing = (await projects()).find(
   (p) => p.draft.title === "Cue — first screening",
 );
 if (existing) {
   console.log(`${origin}/projects/${existing.id}`);
 } else {
-  const p = createProject("Cue — first screening", origin),
+  const p = await createProject("Cue — first screening", origin),
     sources = [];
   for (const name of ["cue-home.png", "cue-guide.png"])
     sources.push(
@@ -36,7 +36,7 @@ if (existing) {
   const draft = starterStoryboard(p.draft, sources);
   draft.cta = "Make your first film with Cue.";
   draft.shots.at(-1)!.caption = draft.cta;
-  editProject(p.id, 1, draft, "Create example film");
+  await editProject(p.id, 1, draft, "Create example film");
   console.log(`${origin}/projects/${p.id}`);
 }
-db.close();
+await db.close();

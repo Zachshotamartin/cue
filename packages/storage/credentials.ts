@@ -8,7 +8,9 @@ const envKeys: Record<Provider, string> = {
   elevenlabs: "ELEVENLABS_API_KEY",
 };
 function master() {
-  const hex = process.env.CUE_MASTER_KEY || localSecret("encryption.key");
+  const hex =
+    process.env.CUE_MASTER_KEY ||
+    (process.env.NODE_ENV === "test" ? localSecret("encryption.key") : "");
   if (!/^[a-f0-9]{64}$/i.test(hex))
     throw new Error("CUE_MASTER_KEY must be 32 bytes encoded as hex.");
   return Buffer.from(hex, "hex");
@@ -48,51 +50,64 @@ export function decryptCredential(
     d.final(),
   ]).toString("utf8");
 }
-export function putCredential(owner: string, provider: Provider, key: string) {
-  db.prepare(
-    "INSERT INTO credentials VALUES(?,?,?,?,?) ON CONFLICT(owner,provider) DO UPDATE SET encrypted=excluded.encrypted,suffix=excluded.suffix,updatedAt=excluded.updatedAt",
-  ).run(
-    owner,
-    provider,
-    encryptCredential(owner, provider, key),
-    key.slice(-4),
-    now(),
-  );
+export async function putCredential(
+  owner: string,
+  provider: Provider,
+  key: string,
+) {
+  await db
+    .prepare(
+      "INSERT INTO credentials VALUES(?,?,?,?,?) ON CONFLICT(owner,provider) DO UPDATE SET encrypted=excluded.encrypted,suffix=excluded.suffix,updatedAt=excluded.updatedAt",
+    )
+    .run(
+      owner,
+      provider,
+      encryptCredential(owner, provider, key),
+      key.slice(-4),
+      now(),
+    );
 }
-export function removeCredential(owner: string, provider: Provider) {
-  db.prepare("DELETE FROM credentials WHERE owner=? AND provider=?").run(
-    owner,
-    provider,
-  );
+export async function removeCredential(owner: string, provider: Provider) {
+  await db
+    .prepare("DELETE FROM credentials WHERE owner=? AND provider=?")
+    .run(owner, provider);
 }
-export function credential(owner: string, provider: Provider) {
-  const row: any = db
+export async function credential(owner: string, provider: Provider) {
+  const row: any = await db
     .prepare("SELECT encrypted FROM credentials WHERE owner=? AND provider=?")
     .get(owner, provider);
   if (row) return decryptCredential(owner, provider, row.encrypted);
-  if (owner === "local" && process.env[envKeys[provider]])
+  if (
+    process.env.CUE_ALLOW_LOCAL_PROVIDER_KEYS === "1" &&
+    owner === "local" &&
+    process.env[envKeys[provider]]
+  )
     return process.env[envKeys[provider]]!;
   throw new Error(
     `Configure your ${provider} API key in Settings before continuing.`,
   );
 }
-export function credentialStatus(owner = "local") {
-  return (["runway", "gemini", "elevenlabs"] as Provider[]).map((provider) => {
-    const row: any = db
-      .prepare(
-        "SELECT suffix,updatedAt FROM credentials WHERE owner=? AND provider=?",
-      )
-      .get(owner, provider);
-    return {
-      provider,
-      configured:
-        !!row || (owner === "local" && !!process.env[envKeys[provider]]),
-      suffix: row?.suffix || null,
-      source: row
-        ? "encrypted"
-        : owner === "local" && process.env[envKeys[provider]]
-          ? "environment"
-          : null,
-    };
-  });
+export async function credentialStatus(owner = "local") {
+  return Promise.all(
+    (["runway", "gemini", "elevenlabs"] as Provider[]).map(async (provider) => {
+      const row: any = await db
+        .prepare(
+          "SELECT suffix,updatedAt FROM credentials WHERE owner=? AND provider=?",
+        )
+        .get(owner, provider);
+      return {
+        provider,
+        configured:
+          !!row || (owner === "local" && !!process.env[envKeys[provider]]),
+        suffix: row?.suffix || null,
+        source: row
+          ? "encrypted"
+          : process.env.CUE_ALLOW_LOCAL_PROVIDER_KEYS === "1" &&
+              owner === "local" &&
+              process.env[envKeys[provider]]
+            ? "environment"
+            : null,
+      };
+    }),
+  );
 }

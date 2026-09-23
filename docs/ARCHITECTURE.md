@@ -27,6 +27,4 @@ Gemini produces a reviewable description and evidence-linked storyboard in one b
 
 ## Boundaries for the hosted version
 
-Public accounts and billing are deliberately absent. The current loopback cookie is an installation credential, not multi-user authentication. Before hosting: authenticated owners, PostgreSQL migrations/locking tests, private object storage, managed envelope encryption, tenant-aware authorization on every asset/job, account-specific audit events, key rotation, quotas and mandatory BYOK. Never place this local server directly on the Internet.
-
-Deferred creative features: arbitrary screen tracking/occlusion in generated footage, automatic recording redaction, word-aligned subtitles, collaboration and a general multitrack timeline. Uploaded music is user-supplied; no stock track licenses are implied.
+The production implementation uses Neon managed authentication and PostgreSQL, private Vercel Blob storage, Vercel Workflow orchestration and Sandbox rendering. Server routes enforce project ownership for every asset/job operation. The old installation-wide loopback cookie is removed. AES-GCM provider credentials are scoped to the signed-in user, with no shared owner-key fallback. See PRODUCTION_PLAN.md for the full account, persistence, recovery and operational contract.

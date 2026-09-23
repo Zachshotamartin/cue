@@ -123,6 +123,9 @@ export type Job = {
   progress: number;
   payload: Record<string, any>;
   providerTaskId: string | null;
+  workflowId?: string;
+  sandboxId?: string;
+  commandId?: string;
   error: string | null;
   outputAssetId: string | null;
   reservedCents: number;

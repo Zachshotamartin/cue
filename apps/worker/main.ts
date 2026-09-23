@@ -9,9 +9,9 @@ process.on("SIGINT", () => {
 });
 console.log("Cue worker ready. Waiting for project jobs.");
 while (!stopping) {
-  const job = claimJob();
+  const job = await claimJob();
   if (job) await runJob(job);
   else await new Promise((r) => setTimeout(r, 1200));
 }
-db.close();
+await db.close();
 console.log("Cue worker stopped after saving its current job.");

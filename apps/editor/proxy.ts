@@ -1,25 +1,7 @@
-import { NextRequest, NextResponse } from "next/server";
-import { origin, sessionSecret } from "../../packages/storage/config";
-export function proxy(req: NextRequest) {
-  if (req.headers.get("host") !== new URL(origin).host)
-    return new NextResponse("Cue is a private local installation.", {
-      status: 403,
-    });
-  const response = NextResponse.next();
-  if (
-    !req.nextUrl.pathname.startsWith("/api/") &&
-    req.method === "GET" &&
-    req.headers.get("sec-fetch-dest") === "document"
-  )
-    response.cookies.set("cue_session", sessionSecret, {
-      httpOnly: true,
-      sameSite: "strict",
-      path: "/",
-      secure: origin.startsWith("https:"),
-      maxAge: 86400 * 30,
-    });
-  return response;
+import { NextResponse } from "next/server";
+// Authentication is verified in every API handler and protected server page.
+// Never mint an account session merely because somebody visited a URL.
+export function proxy() {
+  return NextResponse.next();
 }
-export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|brand/).*)"],
-};
+export const config = { matcher: ["/projects/:path*", "/settings"] };

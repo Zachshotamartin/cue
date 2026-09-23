@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import sharp from "sharp";
-import { assetPath, readBounded } from "../storage/media";
+import { readAsset, readBounded } from "../storage/media";
 import { credential } from "../storage/credentials";
 import { planJsonSchema } from "../director";
 import type { Asset } from "../contracts";
@@ -41,13 +41,13 @@ export async function submitVideo(
   seconds: number,
   format: string,
 ) {
-  const key = credential(owner, "runway");
+  const key = await credential(owner, "runway");
   videoPrice(model, seconds);
   if (source.kind !== "image")
     throw new Error("Choose an image as the generation reference.");
   const ratio = format === "portrait" ? "720:1280" : "1280:720";
   const [width, height] = ratio.split(":").map(Number);
-  const input = await sharp(assetPath(source))
+  const input = await sharp(await readAsset(source))
     .resize(width, height, { fit: "contain", background: "#181a19" })
     .jpeg({ quality: 90 })
     .toBuffer();
@@ -77,7 +77,7 @@ export async function submitVideo(
   return data.id as string;
 }
 export async function pollVideo(owner: string, id: string) {
-  const key = credential(owner, "runway");
+  const key = await credential(owner, "runway");
   return (
     await checked(
       await fetch(
@@ -94,7 +94,7 @@ export async function pollVideo(owner: string, id: string) {
   ).json();
 }
 export async function cancelVideo(owner: string, id: string) {
-  const key = credential(owner, "runway");
+  const key = await credential(owner, "runway");
   await checked(
     await fetch(
       `https://api.dev.runwayml.com/v1/tasks/${encodeURIComponent(id)}`,
@@ -128,7 +128,7 @@ export async function planWithGemini(
   prompt: string,
   assets: Asset[],
 ) {
-  const key = credential(owner, "gemini");
+  const key = await credential(owner, "gemini");
   const imageParts = await Promise.all(
     assets
       .filter((a) => a.kind === "image")
@@ -139,7 +139,7 @@ export async function planWithGemini(
           inlineData: {
             mimeType: "image/jpeg",
             data: (
-              await sharp(assetPath(a))
+              await sharp(await readAsset(a))
                 .resize(960, 600, { fit: "inside" })
                 .jpeg({ quality: 75 })
                 .toBuffer()
@@ -180,7 +180,7 @@ export async function planWithGemini(
   return JSON.parse(text);
 }
 export async function synthesize(owner: string, text: string, voiceId: string) {
-  const key = credential(owner, "elevenlabs");
+  const key = await credential(owner, "elevenlabs");
   if (!/^[a-zA-Z0-9_-]{8,80}$/.test(voiceId))
     throw new Error("Choose a valid ElevenLabs voice ID.");
   const r = await checked(
