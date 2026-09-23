@@ -78,6 +78,23 @@ export async function initializeDatabase() {
         try {
           await c.query("BEGIN");
           await c.query("SELECT pg_advisory_xact_lock(735619284)");
+          // Do not rerun DDL on every server/worker cold start. Even an
+          // already-enabled RLS ALTER takes an exclusive table lock and can
+          // deadlock with active job transactions. The advisory lock also
+          // serializes the first migration across concurrent processes.
+          const migrations = await c.query(
+            "SELECT to_regclass('cue.schema_migrations') AS name",
+          );
+          if (migrations.rows[0]?.name) {
+            const applied = await c.query(
+              "SELECT version FROM cue.schema_migrations WHERE version = $1",
+              [1],
+            );
+            if (applied.rows.length) {
+              await c.query("COMMIT");
+              return;
+            }
+          }
           // Cue uses server-owned SQL transactions. Keep its tables out of the
           // Supabase public Data API rather than exposing encrypted credentials
           // or trusting a browser-supplied owner ID.

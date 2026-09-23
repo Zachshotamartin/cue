@@ -13,9 +13,10 @@ import {
   origin,
   assetSignature,
 } from "../../packages/storage/config";
-import { assets, takes, updateJob, getJob } from "../../packages/storage/db";
+import { assets, takes } from "../../packages/storage/db";
 import { importMedia, inspect, run } from "../../packages/storage/media";
 import type { Job, Draft } from "../../packages/contracts";
+import { createRenderMonitor } from "./render-monitor";
 let serveUrl: string | null = null;
 export async function compositionBundle() {
   if (!serveUrl)
@@ -57,9 +58,7 @@ export async function renderFilm(job: Job) {
   });
   const output = path.join(dataDir, `render-${job.id}.mp4`);
   const { cancel, cancelSignal } = makeCancelSignal();
-  const check = setInterval(async () => {
-    if ((await getJob(job.id)).cancelRequested) cancel();
-  }, 1000);
+  const monitor = createRenderMonitor(job, cancel);
   try {
     await renderMedia({
       composition,
@@ -72,15 +71,9 @@ export async function renderFilm(job: Job) {
       browserExecutable: executable,
       cancelSignal,
       crf: 20,
-      onProgress: async ({ progress }) => {
-        const j = await getJob(job.id);
-        if (Math.round(progress * 90) > j.progress)
-          await updateJob(j, {
-            progress: Math.round(progress * 90),
-            leaseUntil: Date.now() + 60000,
-          });
-      },
+      onProgress: monitor.onProgress,
     });
+    await monitor.stop();
     let info = await inspect(output);
     if (info.streams?.some((s: any) => s.codec_type === "audio")) {
       const limited = `${output}.limited.mp4`;
@@ -140,7 +133,7 @@ export async function renderFilm(job: Job) {
     await fs.unlink(poster).catch(() => {});
     return asset;
   } finally {
-    clearInterval(check);
     await fs.unlink(output).catch(() => {});
+    await monitor.stop();
   }
 }

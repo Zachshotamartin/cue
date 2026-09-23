@@ -10,7 +10,22 @@ The application now uses Supabase Auth and PostgreSQL, private Vercel Blob asset
 - The private Vercel Blob store passed authenticated write/read and rejected anonymous reads. Production dependency audit reported zero known vulnerabilities after the Supabase migration.
 - Vercel upload inputs were audited. Environment files, local databases, test data and provisioning credentials are excluded explicitly by .vercelignore.
 
-The OpenAI/Claude planner addition passed mocked wire-contract tests, provider-specific encrypted key isolation, saved per-film selection, queue routing, legacy Gemini compatibility and refusal/truncation handling. These tests do not certify real paid provider responses.
+The OpenAI/Claude planner addition passed mocked wire-contract tests, provider-specific encrypted key isolation, saved per-film selection, queue routing, legacy Gemini compatibility and refusal/truncation handling. Real provider evidence is recorded below separately from those mocked checks.
+
+## Live provider verification — September 23, 2026
+
+Using the owner's saved, encrypted provider keys, the localhost editor and local worker completed a separate film titled **Cue — live provider check**. Only the repository's public Cue screen fixtures and a synthetic brief were sent to the providers; the original film was unchanged.
+
+- **OpenAI:** `gpt-5.4-mini` returned a valid four-scene storyboard with source references. Reviewing and applying the saved proposal passed.
+- **Runway:** one `gen4_turbo` image-to-video request completed. The saved take is H.264, 1280 × 720, 5.042 seconds; selecting the take and playing the scene passed.
+- **ElevenLabs:** the stock-voice lookup and one `eleven_multilingual_v2` narration request completed. Bella spoke “Your product. In motion.” The saved MP3 is 44.1 kHz and 1.750 seconds. Assigning and playing it through the visible audio control passed.
+- Reloading and opening a new tab retained the storyboard, selected take, narration assignment and completed jobs. The new tab also showed the downloadable export.
+- A **23.019-second, 1920 × 1080 H.264/AAC MP4** completed using the generated clip and narration. The file was retrieved from private Blob storage, inspected with FFprobe, checked for non-silent opening audio, and its opening frame inspected. Scene 3 was switched from hybrid to Exact UI to keep the test to one paid video request.
+- Cue recorded **$0.55 in estimated charges** for one storyboard, one video and one narration. This is its conservative ledger estimate, not a reconciled provider invoice. Render retries did not submit new provider generations.
+
+The full export exposed two bugs, fixed locally in this branch: database cold starts repeated RLS DDL and could deadlock active jobs; frame-level asynchronous progress writes exhausted the connection pool and could crash the worker. Startup now skips completed migrations, and the render monitor coalesces progress/cancellation checks into at most one in-flight database operation per second, propagating failures through the awaited job. A real PostgreSQL check initialized successfully while a job-table write lock was held. **92 automated tests, TypeScript, extension packaging and the production build pass**, including regression coverage for migration rollback, startup lock avoidance, slow-database coalescing, cancellation and failure propagation.
+
+The initial failed render is retained in history. After restarting the local web server and worker with the fixes, a new export completed with the same provider assets. These new fixes have not yet been deployed to production. The localhost worker must remain running (`npm run dev` starts both web and worker when the database is configured).
 
 ## Verified on the deployed application
 
@@ -26,7 +41,7 @@ The OpenAI/Claude planner addition passed mocked wire-contract tests, provider-s
 
 Public signup and password recovery require custom SMTP: Supabase's default sender only serves organization members. Custom confirmation/recovery templates are prepared but cannot be enabled on the free plan until SMTP is configured. Default same-browser PKCE callbacks remain supported.
 
-Real Runway/OpenAI/Claude/Gemini/ElevenLabs generation is not certified without user-supplied keys and a live test. The authenticated Chrome capture test remains postponed at the user's request. Original local projects are preserved and have been imported into the verified owner account.
+Real Claude/Gemini generation and the cloud Workflow path for paid provider jobs remain unverified; the successful paid tests above used the local worker with account-owned cloud storage. Provider invoice reconciliation and live paid cancellation/ambiguous-submission recovery also remain unverified. The authenticated Chrome capture test remains postponed at the user's request. Original local projects are preserved and have been imported into the verified owner account.
 
 The historical evidence below is from the original local prototype and does not certify the account-based cloud release.
 
