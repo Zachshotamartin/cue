@@ -20,7 +20,7 @@ Next.js is hosted on Vercel. Supabase provides Postgres and managed authenticati
 1. Create/link the Vercel project and provision Supabase with Auth plus a private Blob store. Use a dedicated project, enable email confirmation and configure the exact application callback URLs.
 2. Configure the server-only values in `.env.example`. Use the provider CA through DATABASE_CA_BASE64 for verified database TLS. Generate independent 32-byte secrets; use Vercel CLI sensitive envs. Keep an encrypted operator backup of the encryption key.
 3. `npm ci`, `npm run db:migrate`, `npm run check`.
-4. Publish the source commit and set `CUE_RENDER_REF` to that commit. Deploy with the Vercel CLI. GitHub Actions is not required.
+4. Publish the source commit and set `CUE_RENDER_REF` to that commit. Follow the [manual release process](docs/releases.md): stage the Vercel deployment, verify it, then promote it. GitHub CI runs checks; it does not automatically deploy production.
 5. Configure custom SMTP in Supabase for public signup and password recovery. Supabase’s default sender only delivers to organization members. Then enable the prepared confirmation/recovery templates in supabase/config.toml.
 6. Create and verify an account. Add provider keys in Settings. Verify save/reload, account isolation, exports and provider execution before announcing a production release.
 

@@ -3,6 +3,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import fs from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
+import ffmpeg from "ffmpeg-static";
 import { randomUUID } from "node:crypto";
 import {
   createProject,
@@ -199,7 +200,7 @@ describe("saved films and render preflight", () => {
   it("prevents audio truncation and incomplete generated scenes", async () => {
     const p = await createProject("Narration");
     const file = path.join(dataDir, "voice.wav");
-    await run("ffmpeg", [
+    await run(ffmpeg!, [
       "-v",
       "error",
       "-f",
@@ -343,7 +344,7 @@ describe("media and resumable uploads", () => {
   it("normalizes duration-less recorder WebM and rejects trims past its end", async () => {
     const p = await createProject("Recording");
     const { stdout } = await run(
-      "ffmpeg",
+      ffmpeg!,
       [
         "-v",
         "error",

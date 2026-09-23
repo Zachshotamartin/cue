@@ -18,10 +18,23 @@ export function isExtension(value: string) {
   return /^chrome-extension:\/\/[a-p]{32}$/.test(value);
 }
 export function assertHost(req: Request) {
-  const expected = new URL(origin).host;
+  trustedRequestOrigin(req);
+}
+export function trustedRequestOrigin(req: Request) {
+  const configured = new URL(origin);
   const actual = req.headers.get("host") || new URL(req.url).host;
-  if (actual !== expected && actual !== process.env.VERCEL_URL)
-    throw new HttpError(403, "Request host is not allowed.");
+  // Next may rewrite req.url to localhost behind the development server or proxy.
+  // Only configured hosts determine the public origin; forwarded headers cannot.
+  if (actual === configured.host) return configured.origin;
+  if (process.env.VERCEL_URL && actual === process.env.VERCEL_URL)
+    return `https://${process.env.VERCEL_URL}`;
+  throw new HttpError(403, "Request host is not allowed.");
+}
+export function assertSameOrigin(req: Request) {
+  const expected = trustedRequestOrigin(req);
+  if (requestOrigin(req) !== expected)
+    throw new HttpError(403, "Request origin is not allowed.");
+  return expected;
 }
 export async function sessionUser() {
   if (!process.env.SUPABASE_URL && process.env.NODE_ENV !== "test")
@@ -34,13 +47,8 @@ export async function sessionUser() {
   return user;
 }
 export async function assertOwner(req: Request, verified = false) {
-  assertHost(req);
-  if (
-    !["GET", "HEAD"].includes(req.method) &&
-    requestOrigin(req) !== new URL(req.url).origin &&
-    requestOrigin(req) !== origin
-  )
-    throw new HttpError(403, "Request origin is not allowed.");
+  if (["GET", "HEAD"].includes(req.method)) assertHost(req);
+  else assertSameOrigin(req);
   const user = await sessionUser();
   if (verified && !user.emailVerified)
     throw new HttpError(
@@ -86,9 +94,9 @@ export async function exchangePairing(code: string, request: Request) {
   });
 }
 export async function assertCapture(req: Request, id: string) {
-  assertHost(req);
+  const expected = trustedRequestOrigin(req);
   const o = requestOrigin(req);
-  if (o === origin || o === new URL(req.url).origin) {
+  if (o === expected) {
     const owner = await assertOwner(req);
     await project(id, owner);
     return owner;
