@@ -1,0 +1,12 @@
+node_modules
+.data
+.test-data
+dist
+.next
+apps/editor/.next
+apps/editor/public/downloads
+apps/extension/vendor
+package-lock.json
+*.png
+*.woff2
+*.mp4

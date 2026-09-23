@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Cue Capture</title>
+    <link rel="stylesheet" href="panel.css" />
+  </head>
+  <body>
+    <header>
+      <div class="logo"><i></i>cue</div>
+      <span>Capture</span>
+    </header>
+    <main>
+      <section id="pair">
+        <h1>Give your product a cue.</h1>
+        <p>Open a project in Cue and copy its pairing code.</p>
+        <label
+          >Cue address<input id="server" value="http://127.0.0.1:5303" /></label
+        ><label
+          >Pairing code<input
+            id="code"
+            placeholder="12-character code"
+            autocomplete="off" /></label
+        ><button id="pair-button">Connect project</button>
+      </section>
+      <section id="capture" hidden>
+        <div class="project">
+          <small>CONNECTED PROJECT</small><strong id="project-title"></strong>
+        </div>
+        <button id="inspect">Find pages in this tab</button>
+        <p>
+          Your login stays in the browser. Review screens before sending them to
+          Cue.
+        </p>
+        <div id="routes"></div>
+        <div class="row">
+          <button id="traverse">Capture selected</button
+          ><button id="pause" class="quiet">Pause</button>
+        </div>
+        <label
+          >Name this screen<input
+            id="label"
+            placeholder="For example, the finished result"
+        /></label>
+        <div class="row">
+          <button id="current">Capture this screen</button
+          ><button id="mask" class="quiet">Mask an area</button>
+        </div>
+        <p class="hint">
+          Mask an area, then click the content to hide. Press Escape to cancel.
+          Password and email fields are masked automatically.
+        </p>
+        <button id="record" class="quiet wide">Record interaction</button>
+        <p class="hint">
+          Up to 60 seconds. Record sanitized demo data. Audio is off.
+        </p>
+        <h2>Review captures</h2>
+        <div id="captures"></div>
+        <a id="editor-link" target="_blank" rel="noopener">Open in Cue ↗</a
+        ><button id="change" class="quiet">Change project</button>
+      </section>
+      <p id="message" role="status"></p>
+    </main>
+    <script type="module" src="panel.js"></script>
+  </body>
+</html>
