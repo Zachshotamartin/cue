@@ -1,7 +1,8 @@
 "use client";
-import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
 import { authClient } from "../lib/auth-client";
+import { Button } from "./ui/Button";
 export function AccountSettings() {
   const { data } = authClient.useSession();
   const [message, setMessage] = useState("");
@@ -33,7 +34,7 @@ export function AccountSettings() {
       </div>
       <div className="account-actions">
         {data?.user && !data.user.emailVerified && (
-          <button
+          <Button
             className="button secondary"
             onClick={async () => {
               const r = await authClient.sendVerificationEmail({
@@ -44,9 +45,9 @@ export function AccountSettings() {
             }}
           >
             Verify email
-          </button>
+          </Button>
         )}
-        <button
+        <Button
           className="button secondary"
           onClick={async () => {
             const r = await authClient.revokeOtherSessions();
@@ -54,10 +55,10 @@ export function AccountSettings() {
           }}
         >
           Sign out other devices
-        </button>
-        <button className="button secondary" onClick={signOut}>
+        </Button>
+        <Button className="button secondary" onClick={signOut}>
           Sign out
-        </button>
+        </Button>
       </div>
       {message && <p role="status">{message}</p>}
     </section>

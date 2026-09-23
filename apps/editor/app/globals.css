@@ -2211,3 +2211,160 @@ code {
     width: 100%;
   }
 }
+
+/* Shared controls and workspace panels. Panel dimensions are presentation only. */
+.auto-textarea {
+  resize: none;
+  overflow-y: hidden;
+  box-sizing: border-box;
+}
+.editor-body {
+  display: flex;
+  min-width: 0;
+}
+.editor-body > .stage-panel {
+  flex: 1;
+  min-width: 280px;
+}
+.resizable-sidebar {
+  position: relative;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-width: 100%;
+  background: #eeeee7;
+}
+.sidebar-content {
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.sidebar-content[hidden] {
+  display: none;
+}
+.sidebar-content > .source-panel,
+.sidebar-content > .inspector {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+.sidebar-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 36px;
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  background: transparent;
+  border-bottom: 1px solid var(--line);
+}
+.sidebar-right .sidebar-toggle {
+  flex-direction: row-reverse;
+}
+.sidebar-toggle:hover {
+  color: var(--ink);
+  background: #e4e5dc;
+}
+.is-collapsed .sidebar-toggle {
+  height: 100%;
+  flex-direction: column;
+  justify-content: flex-start;
+  padding: 12px 6px;
+}
+.is-collapsed .sidebar-toggle span {
+  writing-mode: vertical-rl;
+}
+.sidebar-resize-handle {
+  position: absolute;
+  top: 36px;
+  bottom: 0;
+  width: 10px;
+  z-index: 10;
+  cursor: col-resize;
+  touch-action: none;
+}
+.sidebar-left .sidebar-resize-handle {
+  right: -5px;
+}
+.sidebar-right .sidebar-resize-handle {
+  left: -5px;
+}
+.sidebar-resize-handle::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  width: 2px;
+  top: 0;
+  bottom: 0;
+  background: transparent;
+}
+.sidebar-resize-handle:hover::after,
+.sidebar-resize-handle:focus-visible::after,
+.is-resizing .sidebar-resize-handle::after {
+  background: var(--ink);
+}
+.editor-body:has(.is-resizing) {
+  user-select: none;
+  cursor: col-resize;
+}
+.inspector-tabs {
+  flex-wrap: wrap;
+}
+.inspector-content,
+.source-scroll {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 900px) {
+  .editor-shell {
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+  }
+  .editor-body {
+    flex-direction: column;
+  }
+  .editor-body > .stage-panel {
+    order: 0;
+    width: 100%;
+    min-width: 0;
+  }
+  .resizable-sidebar {
+    width: 100% !important;
+  }
+  .sidebar-left {
+    order: 1;
+  }
+  .sidebar-right {
+    order: 2;
+  }
+  .sidebar-content {
+    overflow: visible;
+  }
+  .sidebar-content > .source-panel {
+    max-height: 360px;
+  }
+  .sidebar-content > .inspector {
+    overflow: visible;
+  }
+  .sidebar-toggle,
+  .is-collapsed .sidebar-toggle {
+    height: auto;
+    flex-direction: row;
+    justify-content: flex-start;
+  }
+  .is-collapsed .sidebar-toggle span {
+    writing-mode: horizontal-tb;
+  }
+  .sidebar-resize-handle {
+    display: none;
+  }
+  .preview-stage {
+    min-height: 300px;
+  }
+}
