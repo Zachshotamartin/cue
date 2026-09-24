@@ -1,3 +1,8 @@
+import { mergeRoutes } from "./route-discovery.js";
+import {
+  startInteractionCapture,
+  stopInteractionCapture,
+} from "./interaction-capture.js";
 import {
   normalizeRoute,
   family,
@@ -56,6 +61,46 @@ chrome.runtime.onStartup.addListener(async () => {
       message: "Capture interrupted. Resume when the page is ready.",
     });
 });
+chrome.debugger.onEvent.addListener(async (source, method, params) => {
+  if (method !== "Runtime.bindingCalled" || params.name !== "__cueInteraction")
+    return;
+  const s = await load();
+  if (source.tabId !== s.tabId || !s.recording || s.recordPaused) return;
+  try {
+    const value = JSON.parse(params.payload);
+    if (!["click", "scroll", "focus", "pointer"].includes(value.type)) return;
+    await chrome.runtime.sendMessage({
+      target: "offscreen",
+      type: "EVENT",
+      event: {
+        type: value.type,
+        label: String(value.label || "").slice(0, 100),
+        ...(Number.isFinite(value.x) && Number.isFinite(value.y)
+          ? {
+              x: Math.min(1, Math.max(0, value.x)),
+              y: Math.min(1, Math.max(0, value.y)),
+            }
+          : {}),
+      },
+    });
+  } catch {}
+});
+chrome.webNavigation.onBeforeNavigate.addListener(async (d) => {
+  const s = await load();
+  if (d.frameId === 0 && d.tabId === s.tabId && s.recording) {
+    await chrome.runtime
+      .sendMessage({
+        target: "offscreen",
+        type: "STOP",
+        discard: new URL(d.url).origin !== s.sourceOrigin,
+      })
+      .catch(() => {});
+    await save({
+      message:
+        "Page navigation ended this segment. Record the next step when ready.",
+    });
+  }
+});
 chrome.webNavigation.onCommitted.addListener(async (d) => {
   if (d.frameId !== 0) return;
   const s = await load();
@@ -76,11 +121,24 @@ chrome.webNavigation.onCommitted.addListener(async (d) => {
   }
 });
 chrome.webNavigation.onHistoryStateUpdated.addListener(async (d) => {
-  if (d.frameId === 0 && d.tabId === (await load()).tabId) epoch++;
+  await recordNavigation(d);
 });
 chrome.webNavigation.onReferenceFragmentUpdated.addListener(async (d) => {
-  if (d.frameId === 0 && d.tabId === (await load()).tabId) epoch++;
+  await recordNavigation(d);
 });
+async function recordNavigation(d) {
+  const s = await load();
+  if (d.frameId !== 0 || d.tabId !== s.tabId) return;
+  epoch++;
+  if (s.recording && !s.recordPaused)
+    await chrome.runtime
+      .sendMessage({
+        target: "offscreen",
+        type: "EVENT",
+        event: { type: "navigation", label: "Page state changed" },
+      })
+      .catch(() => {});
+}
 chrome.debugger.onDetach.addListener(async ({ tabId }) => {
   const s = await load();
   if (s.tabId === tabId && s.status === "capturing")
@@ -136,20 +194,13 @@ async function inspectTab() {
   const s = await load();
   await attach(tab.id);
   const e = await evaluate(tab.id, evidenceExpression);
-  const routes = [];
-  const seen = new Set();
-  for (const a of [{ href: tab.url, label: tab.title }, ...e.links]) {
-    const url = normalizeRoute(a.href, tab.url);
-    if (!url || seen.has(url)) continue;
-    seen.add(url);
-    routes.push({
-      url,
-      label: a.label || new URL(url).pathname,
-      family: family(url),
-      selected: routes.length < 25,
-      state: "pending",
-    });
-  }
+  const same = s.sourceOrigin === new URL(tab.url).origin;
+  const routes = mergeRoutes(
+    same ? s.routes : [],
+    [{ href: tab.url, label: tab.title }, ...e.links],
+    tab.url,
+    !same || !s.routes.length,
+  );
   return save({
     tabId: tab.id,
     sourceOrigin: new URL(tab.url).origin,
@@ -288,7 +339,23 @@ async function traverse() {
         await send(s.tabId, "Page.navigate", { url: route.url });
         await new Promise((r) => setTimeout(r, 800));
         if ((await load()).paused) break;
+        const actual = await evaluate(s.tabId, evidenceExpression);
+        if (
+          new URL(actual.url).origin !== s.sourceOrigin ||
+          (/\/(login|sign-in|signin|auth)(\/|$)/i.test(
+            new URL(actual.url).pathname,
+          ) &&
+            !route.url.includes(new URL(actual.url).pathname))
+        )
+          throw new Error("Sign in again, then retry this page.");
         await capture(route.label);
+        await save({
+          routes: mergeRoutes(
+            (await load()).routes,
+            actual.links,
+            s.originalUrl,
+          ),
+        });
         await save({
           routes: (await load()).routes.map((r) =>
             r.url === route.url ? { ...r, state: "captured" } : r,
@@ -324,7 +391,7 @@ async function traverse() {
     busy = false;
   }
 }
-async function recordStart() {
+async function recordStart(options = {}) {
   const s = await load(),
     tab = await currentTab();
   if (
@@ -339,26 +406,39 @@ async function recordStart() {
       reasons: ["USER_MEDIA"],
       justification: "Record a short user-approved product demonstration.",
     });
-  const streamId = await chrome.tabCapture.getMediaStreamId({
-    targetTabId: s.tabId,
-  });
-  const result = await chrome.runtime.sendMessage({
-    target: "offscreen",
-    type: "START",
-    streamId,
-    metadata: {
-      url: tab.url,
-      title: tab.title,
-      state: "Product demonstration",
-    },
-  });
-  if (!result?.ok)
-    throw new Error(result?.error || "Could not start recording.");
-  return save({
-    recording: true,
-    message:
-      "Recording this tab. Use demo data; recordings are reviewed before upload.",
-  });
+  try {
+    await attach(s.tabId);
+    await send(s.tabId, "Runtime.addBinding", { name: "__cueInteraction" });
+    await evaluate(s.tabId, startInteractionCapture);
+    const streamId = await chrome.tabCapture.getMediaStreamId({
+      targetTabId: s.tabId,
+    });
+    const result = await chrome.runtime.sendMessage({
+      target: "offscreen",
+      type: "START",
+      streamId,
+      audio: !!options.audio,
+      maxSeconds: Math.min(180, Math.max(15, Number(options.maxSeconds) || 60)),
+      metadata: {
+        url: tab.url,
+        title: tab.title,
+        state: String(options.label || "Product demonstration").slice(0, 100),
+        journey: String(options.journey || "").slice(0, 1000),
+      },
+    });
+    if (!result?.ok)
+      throw new Error(result?.error || "Could not start recording.");
+    return save({
+      recording: true,
+      recordPaused: false,
+      message:
+        "Recording this tab. Use demo data; recordings are reviewed before upload.",
+    });
+  } catch (error) {
+    await evaluate(s.tabId, stopInteractionCapture).catch(() => {});
+    await save({ recording: false, recordPaused: false });
+    throw error;
+  }
 }
 chrome.runtime.onMessage.addListener((m, sender, reply) => {
   if (m.target === "offscreen" || m.type === "UPDATED") return;
@@ -368,6 +448,44 @@ chrome.runtime.onMessage.addListener((m, sender, reply) => {
     switch (m.type) {
       case "STATE":
         return load();
+      case "RESET_JOURNEY":
+        return save({ journeyCompleted: [] });
+      case "JOURNEY_STEP": {
+        const s = await load();
+        if (!s.recording || s.recordPaused)
+          throw new Error("Record the step before marking its result.");
+        const index = Number(m.index),
+          steps = String(s.recordOptions?.journey || "")
+            .split("\n")
+            .map((s) => s.trim())
+            .filter(Boolean)
+            .slice(0, 12);
+        if (!Number.isInteger(index) || !steps[index])
+          throw new Error("Unknown capture step.");
+        await chrome.runtime.sendMessage({
+          target: "offscreen",
+          type: "EVENT",
+          event: { type: "result", label: steps[index].slice(0, 100) },
+        });
+        return save({
+          journeyCompleted: [
+            ...new Set([...(s.journeyCompleted || []), index]),
+          ],
+        });
+      }
+      case "RECORD_OPTIONS":
+        return save({
+          ...((await load()).recordOptions?.journey !==
+          String(m.journey || "").slice(0, 1000)
+            ? { journeyCompleted: [] }
+            : {}),
+          recordOptions: {
+            journey: String(m.journey || "").slice(0, 1000),
+            label: String(m.label || "").slice(0, 100),
+            maxSeconds: Math.min(180, Math.max(15, Number(m.maxSeconds) || 60)),
+            audio: !!m.audio,
+          },
+        });
       case "PAIR": {
         const server = new URL(m.server);
         if (
@@ -405,6 +523,11 @@ chrome.runtime.onMessage.addListener((m, sender, reply) => {
           token: x.token,
           projectId: x.projectId,
           projectTitle: x.title,
+          journeyCompleted: [],
+          recordOptions: {
+            ...(await load()).recordOptions,
+            journey: String(x.journey || "").slice(0, 1000),
+          },
         });
       }
       case "INSPECT":
@@ -438,13 +561,34 @@ chrome.runtime.onMessage.addListener((m, sender, reply) => {
           captures: (await load()).captures.filter((x) => x.id !== m.id),
         });
       case "RECORD":
-        return recordStart();
+        return recordStart(m);
+      case "MARKER":
+        return chrome.runtime.sendMessage({
+          target: "offscreen",
+          type: "EVENT",
+          event: {
+            type: "marker",
+            label: String(m.label || "Result visible").slice(0, 100),
+          },
+        });
+      case "PAUSE_RECORD": {
+        const s = await load();
+        const paused = !s.recordPaused;
+        await chrome.runtime.sendMessage({
+          target: "offscreen",
+          type: paused ? "PAUSE" : "RESUME",
+        });
+        return save({ recordPaused: paused });
+      }
       case "STOP_RECORD":
         return chrome.runtime.sendMessage({
           target: "offscreen",
           type: "STOP",
         });
       case "RECORDED":
+        await evaluate((await load()).tabId, stopInteractionCapture).catch(
+          () => {},
+        );
         return save({
           recording: false,
           captures: [
@@ -459,6 +603,9 @@ chrome.runtime.onMessage.addListener((m, sender, reply) => {
           message: "Recording saved. Review it before upload.",
         });
       case "RECORD_FAILED":
+        await evaluate((await load()).tabId, stopInteractionCapture).catch(
+          () => {},
+        );
         return save({ recording: false, message: m.error });
       default:
         throw new Error("Unknown capture command.");

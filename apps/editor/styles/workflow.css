@@ -1,0 +1,269 @@
+/* Film workflow — the same ink, paper and vermilion identity as /brand. */
+.workflow-steps {
+  display: flex;
+  gap: 1.5rem;
+  padding: 0.8rem 1.5rem;
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+.workflow-step {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  white-space: nowrap;
+  background: transparent;
+  color: inherit;
+  border: 0;
+  padding: 0.45rem 0.2rem;
+  font-size: 0.82rem;
+  opacity: 0.65;
+}
+.workflow-step span {
+  font-family: monospace;
+  font-size: 0.75rem;
+}
+.workflow-step.active {
+  opacity: 1;
+  color: var(--accent-dark);
+}
+.brief-fields {
+  display: grid;
+  gap: 1rem;
+  margin: 1.25rem 0;
+}
+.clip-editor {
+  display: grid;
+  gap: 0.8rem;
+  padding-block: 1rem;
+  border-block: 1px solid var(--line);
+  margin-bottom: 1rem;
+}
+.clip-actions {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.clip-actions label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+}
+.clip-actions input {
+  width: auto;
+}
+.source-preview {
+  width: 100%;
+  aspect-ratio: 16/9;
+  background: var(--surface-inset);
+}
+.quality-panel {
+  padding: 1rem;
+  background: var(--panel);
+  margin: 1rem 0;
+}
+.quality-panel ul {
+  padding-left: 1.2rem;
+  display: grid;
+  gap: 0.8rem;
+}
+.quality-panel p,
+.quality-panel li {
+  font-size: 0.85rem;
+  line-height: 1.55;
+}
+.proposal-media {
+  position: relative;
+  max-width: 300px;
+}
+.proposal-media img,
+.proposal-media video {
+  width: 100%;
+  aspect-ratio: 16/9;
+  object-fit: contain;
+  background: var(--surface-inset);
+}
+.proposal-media span {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
+  background: #171917;
+  padding: 0.25rem 0.5rem;
+}
+.proposal-scene {
+  grid-template-columns: minmax(140px, 40%) 1fr;
+  align-items: start;
+}
+.proposal-scene p {
+  margin: 0.5rem 0;
+}
+@media (max-width: 700px) {
+  .workflow-steps {
+    gap: 1rem;
+    padding: 0.5rem 0.75rem;
+  }
+  .proposal-scene {
+    grid-template-columns: 1fr;
+  }
+  .proposal-media {
+    max-width: none;
+  }
+}
+
+.crop-surface {
+  position: relative;
+  overflow: hidden;
+  touch-action: none;
+  cursor: crosshair;
+  background: var(--surface-inset);
+}
+.crop-surface img,
+.crop-surface video {
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+}
+.crop-outline {
+  position: absolute;
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 0 999px #0006;
+  pointer-events: none;
+}
+.visual-crop {
+  display: grid;
+  gap: 0.75rem;
+}
+.audio-waveform {
+  width: 100%;
+  height: 64px;
+  color: var(--accent);
+}
+.library-filter input {
+  width: min(260px, 40vw);
+  margin-right: auto;
+}
+.project-actions {
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+.connection-check {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-block: 1rem;
+}
+.connection-check p {
+  flex-basis: 100%;
+}
+
+.capture-plan {
+  display: grid;
+  gap: 12px;
+  margin: 20px 0 28px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.capture-plan ol {
+  padding-left: 24px;
+  margin: 0;
+  display: grid;
+  gap: 8px;
+}
+.evidence-strip {
+  display: flex;
+  overflow-x: auto;
+  gap: 6px;
+  padding-block: 8px;
+}
+.evidence-moment {
+  flex: 0 0 86px;
+  display: grid;
+  gap: 3px;
+  text-align: center;
+  background: transparent;
+  color: inherit;
+  border: 0;
+  padding: 0;
+}
+.evidence-moment img {
+  width: 86px !important;
+  height: 50px !important;
+  object-fit: contain !important;
+}
+.evidence-moment:disabled {
+  opacity: 0.7;
+}
+.sound-cue {
+  display: grid;
+  gap: 12px;
+  padding-block: 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.timeline-shot-item {
+  position: relative;
+  min-width: 0;
+}
+.timeline-shot-item > .timeline-shot {
+  width: 100%;
+  height: 100%;
+}
+.timeline-handle {
+  position: absolute;
+  right: -5px;
+  top: 0;
+  bottom: 0;
+  width: 10px;
+  cursor: ew-resize;
+  touch-action: none;
+  z-index: 2;
+}
+.timeline-handle::after {
+  content: "";
+  position: absolute;
+  right: 3px;
+  top: 12%;
+  bottom: 12%;
+  width: 3px;
+  background: var(--accent);
+  border-radius: 4px;
+  opacity: 0.5;
+}
+.timeline-handle:hover::after,
+.timeline-handle:focus-visible::after {
+  opacity: 1;
+}
+.timeline-handle:focus-visible {
+  outline: 2px solid var(--accent);
+}
+.timeline-trim-value {
+  position: absolute;
+  right: 4px;
+  top: -24px;
+  background: var(--ink);
+  color: var(--paper);
+  padding: 3px 6px;
+  white-space: nowrap;
+}
+.timeline-frames {
+  display: flex !important;
+  width: 100%;
+  height: 100%;
+  gap: 0;
+}
+.timeline-frames img {
+  min-width: 0;
+  flex: 1;
+  width: 33.33% !important;
+  object-fit: cover;
+}
+.timeline-shot small {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  display: block;
+}

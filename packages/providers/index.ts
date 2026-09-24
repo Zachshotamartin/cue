@@ -1,14 +1,13 @@
-import fs from "node:fs/promises";
 import sharp from "sharp";
-import { readAsset, readBounded } from "../storage/media";
-import { credential } from "../storage/credentials";
-import { planJsonSchema } from "../director";
 import {
-  planners,
   plannerProviderSchema,
-  type PlannerProvider,
+  planners,
   type Asset,
+  type PlannerProvider,
 } from "../contracts";
+import { planJsonSchema } from "../director";
+import { credential } from "../storage/credentials";
+import { readAsset, readBounded } from "../storage/media";
 export class ProviderError extends Error {
   constructor(
     message: string,
@@ -48,6 +47,8 @@ export async function submitVideo(
   format: string,
 ) {
   const key = await credential(owner, "runway");
+  if (source.metadata.privacyPending || source.metadata.supersededBy)
+    throw new Error("Choose the reviewed safe copy before generating video.");
   videoPrice(model, seconds);
   if (source.kind !== "image")
     throw new Error("Choose an image as the generation reference.");
@@ -193,20 +194,8 @@ export function plannerModel(provider: PlannerProvider) {
 }
 
 async function planningImages(assets: Asset[]) {
-  return Promise.all(
-    assets
-      .filter((a) => a.kind === "image")
-      .slice(0, 6)
-      .map(async (asset) => ({
-        label: `Reference image asset ID: ${asset.id}`,
-        data: (
-          await sharp(await readAsset(asset))
-            .resize(960, 600, { fit: "inside", withoutEnlargement: true })
-            .jpeg({ quality: 75 })
-            .toBuffer()
-        ).toString("base64"),
-      })),
-  );
+  const { visualEvidence } = await import("../director/analysis");
+  return visualEvidence(assets);
 }
 
 async function plannerResponse(response: Response) {
@@ -233,13 +222,13 @@ function parsePlanText(text: unknown) {
       plan.description.length > 2000 ||
       !Array.isArray(plan.shots) ||
       plan.shots.length < 4 ||
-      plan.shots.length > 7 ||
+      plan.shots.length > 12 ||
       plan.shots.some(
         (shot: any) =>
           !shot ||
           typeof shot.duration !== "number" ||
           shot.duration < 3 ||
-          shot.duration > 8,
+          shot.duration > 15,
       )
     )
       throw new Error();
@@ -253,17 +242,20 @@ function parsePlanText(text: unknown) {
   }
 }
 
-// Claude's strict output grammar cannot express numeric bounds or 4–7 items.
+// Claude's strict output grammar cannot express numeric bounds or 4–12 items.
 // Keep them in field descriptions; Cue validates the proposal before saving it.
 const claudePlanSchema = structuredClone(planJsonSchema);
 const claudeShots: any = claudePlanSchema.properties.shots;
 delete claudeShots.minItems;
 delete claudeShots.maxItems;
-claudeShots.description = "Return 4 to 7 scenes.";
+claudeShots.description = "Return 4 to 12 scenes.";
+delete claudeShots.items.properties.trimStart.minimum;
+claudeShots.items.properties.trimStart.description =
+  "Source start time in seconds, at least zero.";
 delete claudeShots.items.properties.duration.minimum;
 delete claudeShots.items.properties.duration.maximum;
 claudeShots.items.properties.duration.description =
-  "Scene duration in seconds, from 3 to 8.";
+  "Scene duration in seconds, from 3 to 15.";
 
 export async function planStoryboard(
   owner: string,

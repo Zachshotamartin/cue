@@ -31,6 +31,9 @@ export default function Brand() {
           <a className="button secondary" href="/brand/cue-icon.svg" download>
             Download mark
           </a>
+          <a className="button secondary" href="/brand/cue-logo.svg" download>
+            Download logo
+          </a>
         </div>
       </main>
     </>

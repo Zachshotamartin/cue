@@ -1,4 +1,10 @@
 "use client";
+import { NarrationScript } from "./NarrationScript";
+import { AudioWaveform } from "./AudioWaveform";
+import { SoundStudio } from "./SoundStudio";
+import { VoicePicker } from "./VoicePicker";
+import { PronunciationControls } from "./PronunciationControls";
+import { AudioRights } from "./AudioRights";
 import { Microphone, MusicNotes } from "@phosphor-icons/react";
 import Link from "next/link";
 import { api, assetUrl, jobOptions, money } from "../client-api";
@@ -33,6 +39,7 @@ export function AudioInspector() {
       {tab === "audio" && (
         <>
           <h2>A voice for the story.</h2>
+          <NarrationScript />
           {shot && (
             <>
               <label>
@@ -40,7 +47,13 @@ export function AudioInspector() {
                 <Textarea
                   rows={4}
                   value={shot.narration}
-                  onChange={(e) => editShot({ narration: e.target.value })}
+                  onChange={(e) =>
+                    editShot({
+                      narration: e.target.value,
+                      narrationAssetId: null,
+                      speechCues: [],
+                    })
+                  }
                   maxLength={1200}
                 />
               </label>
@@ -49,7 +62,13 @@ export function AudioInspector() {
                 <Select
                   value={shot.narrationAssetId || ""}
                   onChange={(e) =>
-                    editShot({ narrationAssetId: e.target.value || null })
+                    editShot({
+                      narrationAssetId: e.target.value || null,
+                      speechCues:
+                        snap.jobs.find(
+                          (j) => j.outputAssetId === e.target.value,
+                        )?.payload.speechCues || [],
+                    })
                   }
                 >
                   <option value="">No narration</option>
@@ -105,8 +124,10 @@ export function AudioInspector() {
                     Connect ElevenLabs ↗
                   </Link>
                 )}
+                <VoicePicker />
+                <PronunciationControls />
                 <label>
-                  ElevenLabs voice ID
+                  Voice ID (optional manual entry)
                   <Input
                     value={voice}
                     onChange={(e) => setVoice(e.target.value)}
@@ -147,6 +168,9 @@ export function AudioInspector() {
             </>
           )}
           <div className="inspector-divider" />
+          {draft.musicAssetId && <AudioWaveform assetId={draft.musicAssetId} />}
+          <SoundStudio />
+          <AudioRights />
           <h3>Film soundtrack</h3>
           <label>
             Music
@@ -197,7 +221,8 @@ export function AudioInspector() {
               (j) =>
                 j.kind === "narrate" &&
                 j.state === "completed" &&
-                j.outputAssetId,
+                j.outputAssetId &&
+                audioAssets.some((a) => a.id === j.outputAssetId),
             )
             .map((j) => (
               <div className="audio-result" key={j.id}>
@@ -205,7 +230,10 @@ export function AudioInspector() {
                 <Button
                   className="text-link"
                   onClick={() =>
-                    editShot({ narrationAssetId: j.outputAssetId })
+                    editShot({
+                      narrationAssetId: j.outputAssetId,
+                      speechCues: j.payload.speechCues || [],
+                    })
                   }
                 >
                   Use in selected scene

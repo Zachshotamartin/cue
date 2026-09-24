@@ -1,16 +1,16 @@
-import { afterAll, describe, expect, it, vi } from "vitest";
 import fs from "node:fs/promises";
 import sharp from "sharp";
+import { afterAll, describe, expect, it, vi } from "vitest";
+import { runJob } from "../apps/worker/runner";
+import { ProviderError } from "../packages/providers";
+import { dataDir } from "../packages/storage/config";
 import {
   createProject,
+  db,
   enqueue,
   getJob,
   updateJob,
-  db,
-  assets,
-  takes,
 } from "../packages/storage/db";
-import { dataDir } from "../packages/storage/config";
 import { importMedia } from "../packages/storage/media";
 const provider = vi.hoisted(() => ({
   submitVideo: vi.fn(),
@@ -25,8 +25,6 @@ vi.mock("../packages/providers", async (importOriginal) => ({
   ...provider,
 }));
 vi.mock("../apps/worker/render", () => ({ renderFilm: vi.fn() }));
-import { runJob } from "../apps/worker/runner";
-import { ProviderError } from "../packages/providers";
 afterAll(async () => {
   await db.close();
   await fs.rm(dataDir, { recursive: true, force: true });
@@ -97,6 +95,19 @@ describe("durable provider jobs", () => {
     await runJob(j);
     expect((await getJob(j.id)).state).toBe("failed");
     expect((await getJob(j.id)).reservedCents).toBe(0);
+  });
+  it("keeps a cancelled ambiguous submission reconcilable instead of trapping its reservation", async () => {
+    vi.clearAllMocks();
+    const j = await job();
+    provider.submitVideo.mockImplementationOnce(async () => {
+      await updateJob(await getJob(j.id), { cancelRequested: true });
+      throw new Error("Connection lost after cancel");
+    });
+    await runJob(j);
+    const saved = await getJob(j.id);
+    expect(saved.state).toBe("unknown");
+    expect(saved.reservedCents).toBe(25);
+    expect(saved.cancelRequested).toBe(true);
   });
   it("cancels a saved provider task, keeps its potential charge, and never resubmits", async () => {
     vi.clearAllMocks();

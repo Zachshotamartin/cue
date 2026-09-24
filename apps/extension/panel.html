@@ -8,7 +8,7 @@
   </head>
   <body>
     <header>
-      <div class="logo"><i></i>cue</div>
+      <img class="logo" src="cue-logo.svg" alt="Cue" width="84" height="39" />
       <span>Capture</span>
     </header>
     <main>
@@ -51,10 +51,35 @@
           Mask an area, then click the content to hide. Press Escape to cancel.
           Password and email fields are masked automatically.
         </p>
+        <label
+          >Workflow to demonstrate<textarea
+            id="journey"
+            rows="3"
+            placeholder="Create an item, change it, then show the result"
+          ></textarea>
+        </label>
+        <div id="journey-checklist"></div>
+        <button id="restart-journey" class="quiet">Reset checklist</button>
+        <label
+          >Recording limit<select id="record-limit">
+            <option value="60">60 seconds</option>
+            <option value="120">2 minutes</option>
+            <option value="180">3 minutes</option>
+          </select></label
+        >
+        <label
+          ><input type="checkbox" id="tab-audio" /> Include tab audio</label
+        >
         <button id="record" class="quiet wide">Record interaction</button>
         <p class="hint">
-          Up to 60 seconds. Record sanitized demo data. Audio is off.
+          Selected masks and password/email fields stay hidden while recording.
+          Use demo data and review the full clip. Full-page navigation ends the
+          segment before recording the next page.
         </p>
+        <div class="row">
+          <button id="pause-record" class="quiet" hidden>Pause recording</button
+          ><button id="marker" class="quiet" hidden>Mark result</button>
+        </div>
         <h2>Review captures</h2>
         <div id="captures"></div>
         <a id="editor-link" target="_blank" rel="noopener">Open in Cue ↗</a

@@ -8,7 +8,15 @@ Both editor sidebars remember their width and collapsed state in this browser. D
 
 Tests enforce shared primitive ownership and one module-level React component per file, and exercise panel bounds across desktop widths, collapsed combinations and damaged saved preferences.
 
-## Review of this change
+## Brand alignment
+
+`Logo.tsx` references a single vector asset shared with the capture extension. Public pages use the chalk palette; `.theme-dark` provides the charcoal workspace and branded panels through semantic color tokens. Global CSS imports tokens, shared controls, public pages, then editor layouts; features do not define their own color palettes or controls.
+
+`TimelineScrubber.tsx` subscribes to the actual Remotion player, exposes frame seeking to pointer and keyboard users, and moves the playhead during playback. Scene columns are proportional to duration, and short scenes expand the scrollable track rather than distorting time. Mobile navigation exposes the same destinations as desktop navigation.
+
+Brand review: checked the landing page, project library, provider settings, authentication, guide, brand downloads, and editor panels in the browser. Checked the 390px mobile and 901px desktop boundary; verified timeline seeking, sidebar collapse, mobile navigation, and the shared light/dark logo. The production build, extension packaging, TypeScript, and all 84 tests pass. This review does not submit paid generation requests.
+
+## Original component extraction review
 
 - Preserved form submission types during shared-button migration; accidental submits now default off.
 - Replaced document-wide dialog lookup with a dialog-owned ref, keyboard focus trap, scroll lock and focus restoration.

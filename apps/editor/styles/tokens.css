@@ -1,0 +1,57 @@
+/* Cue's brand palette. Components consume semantic roles, never page-specific colors. */
+:root {
+  --chalk: #f3f3ee;
+  --charcoal: #181a19;
+  --stone: #b9bbb4;
+  --accent: #df603c;
+  --paper: var(--chalk);
+  --ink: var(--charcoal);
+  --muted: #626660;
+  --line: #d7d8d1;
+  --line-strong: #b9bdb4;
+  --panel: #f9f9f5;
+  --surface-raised: #fcfcf8;
+  --surface-inset: #e7e8e1;
+  --surface-hover: #e1e3da;
+  --input-bg: #fafaf7;
+  --placeholder: #70756d;
+  --badge-bg: #f3f3eeee;
+  --accent-dark: #a44025;
+  --button-bg: var(--charcoal);
+  --button-fg: var(--chalk);
+  --button-hover: #343934;
+  --error-bg: #f8e7df;
+  --error-fg: #873924;
+  --error-border: #daa18f;
+  --warning-bg: #f3e7cf;
+  --warning-border: #bc9c68;
+  --success: #41623c;
+  --radius: 4px;
+}
+
+/* The dark creative workspace from the identity board, also used for brand panels. */
+.theme-dark {
+  color-scheme: dark;
+  --paper: var(--charcoal);
+  --ink: var(--chalk);
+  --muted: #a8ada7;
+  --line: #333834;
+  --line-strong: #505750;
+  --panel: #202421;
+  --surface-raised: #292e2a;
+  --surface-inset: #101310;
+  --surface-hover: #303630;
+  --input-bg: #222723;
+  --placeholder: #9da49d;
+  --badge-bg: #181a19e6;
+  --accent-dark: #f09173;
+  --button-bg: var(--accent);
+  --button-fg: var(--charcoal);
+  --button-hover: #ee7957;
+  --error-bg: #352620;
+  --error-fg: #ffac93;
+  --error-border: #855440;
+  --warning-bg: #352f23;
+  --warning-border: #7a6949;
+  --success: #b3c8a5;
+}

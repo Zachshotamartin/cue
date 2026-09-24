@@ -2,15 +2,15 @@
 
 **Your product. In motion.** Capture a website's real screens, direct a story, edit a film and export it. Cue saves films, source assets and generation jobs to your account.
 
-**Hosted preview:** [cue-tau-green.vercel.app](https://cue-tau-green.vercel.app). Cloud authentication, persistence and real landscape/portrait exports are verified. Public email signup awaits custom SMTP; live AI-provider and authenticated-extension tests remain separate release checks. See [the production plan](docs/PRODUCTION_PLAN.md) and [verification record](docs/VERIFICATION.md).
+**Hosted preview:** [cue-tau-green.vercel.app](https://cue-tau-green.vercel.app). This hosted preview runs the previously deployed release. The workflow upgrade on this branch is verified locally and awaits release review; public email signup needs custom SMTP and authenticated extension capture remains a separate acceptance check. See [the production plan](docs/PRODUCTION_PLAN.md) and [verification record](docs/VERIFICATION.md).
 
 ## Application
 
-- An editable Remotion timeline with captions, crops, transitions, three treatments, voice-over and music uploads.
+- A guided Brief → Capture → Story → Edit & sound → Export workflow, with recording analysis, source intervals, visual crops, callouts, clip speed/split/locks and a shared Remotion preview/export timeline.
 - Exact UI animations, generated clips and hybrid scenes; generated takes never overwrite sources.
 - A Chrome extension for explicitly reviewed screenshot routes and interaction recordings, including authenticated sites without exporting login cookies.
 - Account-based project library, revisions, autosave, conflict recovery, private media and encrypted user-supplied provider keys.
-- Runway video generation; OpenAI, Claude or Gemini storyboarding; ElevenLabs narration. These features require each user's own provider keys and credits.
+- Runway atmosphere generation; OpenAI, Claude or Gemini evidence-based storyboarding; ElevenLabs aligned narration, pronunciation dictionaries, instrumental music and sound effects. These features require each user's own provider keys, access and credits. Generated footage cannot replace demonstrated UI actions.
 - PostgreSQL job records, Vercel Workflow orchestration and bounded Sandbox rendering independent of an open browser.
 
 ## Production infrastructure
@@ -44,7 +44,7 @@ The importer verifies ownership, preserves project/asset IDs and revision histor
 
 ## Capture extension
 
-`npm run extension:build` creates `dist/cue-capture.zip`. Load the unpacked `apps/extension` folder for local development. Open a project, choose Capture, and pair the extension with the project's one-time code. It requests access to your chosen HTTPS Cue address. Review route selection, screenshot masks and recordings before uploading. The real authenticated-browser capture test is currently postponed at the owner's request.
+`npm run extension:build` creates `dist/cue-capture.zip`. Load the unpacked `apps/extension` folder for local development. Open a project, choose Capture, and pair the extension with the project's one-time code. It requests access to your chosen HTTPS Cue address. Review route selection, screenshot masks and recordings before uploading. The updated authenticated-browser capture test is pending installation/permission confirmation. Recordings support a guided journey, pause/resume, sanitized interaction markers and optional tab audio. Review every mask and recording before upload; imported-media masks are static.
 
 ## Provider keys
 
@@ -52,10 +52,10 @@ The importer verifies ownership, preserves project/asset IDs and revision histor
 - [OpenAI API keys](https://platform.openai.com/api-keys): add an API key with model access and API billing. A ChatGPT subscription is separate.
 - [Anthropic API keys](https://platform.claude.com/settings/keys): add a Claude API key with API credits. A Claude subscription is separate.
 - [Google AI Studio](https://aistudio.google.com/apikey): create a Gemini key with access to the configured model.
-- [ElevenLabs API keys](https://elevenlabs.io/app/settings/api-keys): create a key with text-to-speech access.
+- [ElevenLabs API keys](https://elevenlabs.io/app/settings/api-keys): create a key with access to the voice, music and sound-effect APIs you intend to use.
 
 Choose the storyboard provider in the film’s Brief panel. Cue saves this choice per film and records the provider and model on each proposal; applying a proposal is always a separate step. The initial planner models are GPT-5.4 mini, Claude Sonnet 4.6 and Gemini 2.5 Flash. Operators can set OPENAI_PLANNER_MODEL, ANTHROPIC_PLANNER_MODEL or GEMINI_MODEL for new jobs; queued jobs keep their recorded model.
 
-Keys are encrypted at rest per account and used only for explicit jobs. Cue can capture and edit without AI keys. It does not currently generate music or sound effects; upload an audio track for the soundtrack.
+Keys are encrypted at rest per account and used only for explicit requests. Free connection/voice checks are separate from paid generation. Cue can capture and edit without AI keys, and accepts uploaded music or sound effects. Provider usage is estimated, with project/account/global reservation limits; it is not an invoice reconciliation service. See [implementation status](docs/IMPLEMENTATION_STATUS.md) for exact current capabilities and release gates.
 
 See [security](docs/SECURITY.md), [architecture](docs/ARCHITECTURE.md), and [upstream provenance](UPSTREAM.md). Public visibility does not grant a license absent an explicit license file.

@@ -8,8 +8,8 @@ export default function Guide() {
         <p className="eyebrow">From your browser to the screen</p>
         <h1>Make your first film.</h1>
         <p className="reading-lede">
-          Start with real product screens. Give them a story, then direct the
-          motion.
+          Start with a real task in your product. Capture the action and its
+          result, review a story, then shape the final cut.
         </p>
         <section>
           <h2>Capture your product</h2>
@@ -21,9 +21,11 @@ export default function Guide() {
           </p>
           <p>
             Open your website, click Cue Capture, and enter the project’s code.
-            Find pages, choose what to capture, or open a specific product state
-            and capture it yourself. Review each image before sending it to your
-            project.
+            Find pages and approve routes for capture, or record the checklist
+            from your brief. Show the starting state, perform a task, and hold
+            on its result. Pause during waiting, mark useful moments, and review
+            each recording before sending it to Cue. Full page navigation ends
+            the current segment; record the next step after the new page loads.
           </p>
           <a className="button" href="/downloads/cue-capture.zip" download>
             Download extension
@@ -39,14 +41,21 @@ export default function Guide() {
           <p>
             Build a starter storyboard from your captures, or connect OpenAI,
             Claude or Gemini in Settings and choose your planner in Brief. Write
-            the audience, product description and call to action first. A
-            proposal is reviewed before it replaces your timeline.
+            the product name, audience, priority features, target length and
+            call to action first. Recordings are analyzed into timecoded
+            moments. A playable proposal shows the action, result and source
+            trim before it changes your timeline. A demonstration needs actual
+            product footage; choose a teaser if you only have still images.
           </p>
           <p>
             Select a scene to change its title, caption, length, movement or
-            source. Exact UI preserves your real screenshot or recording.
-            Generated video uses a selected Runway take. Hybrid places your real
-            interface over generated footage.
+            source. Exact UI preserves your real screenshot or recording. Use
+            timeline handles or clip controls to trim, split and change speed.
+            Draw a crop on the source, set an ending crop for a camera move, and
+            add timed click highlights. Lock scenes you want to keep when
+            replanning, or ask AI to revise just one scene. Generated video uses
+            a selected Runway take. Hybrid places your real interface over
+            generated footage.
           </p>
         </section>
         <section>
@@ -66,19 +75,28 @@ export default function Guide() {
         <section>
           <h2>Give it a voice</h2>
           <p>
-            Import your own narration or connect ElevenLabs with a voice ID.
-            Assign audio to each scene and allow enough time for the whole
-            sentence. Add music you have permission to use; it lowers
-            automatically under narration.
+            Connect ElevenLabs, preview its available voices and select one.
+            Edit narration across the film or per scene, then generate only the
+            scenes you want. New speech includes timed captions. Imported audio
+            remains available too; allow enough time for the complete sentence.
+            Generate instrumental music or short effects, or upload licensed
+            audio. Adjust cue timing, trim, level and fades. Music ducks during
+            speech, and the final export normalizes audio to a consistent level.
           </p>
         </section>
         <section>
           <h2>Export the final cut</h2>
           <p>
             Choose landscape, portrait or square, review the framing, and export
-            an MP4. Rendering runs locally in a separate worker. Closing the
-            editor does not discard accepted jobs. The export panel also offers
-            scene captions, a poster and a project archive.
+            an MP4. Rendering runs in the cloud, independently of your browser.
+            Closing the editor does not discard accepted jobs. The export panel
+            checks for missing sources, invalid trims, cut-off speech and
+            private originals. Download aligned speech captions, a poster and a
+            portable project archive. Unzip that archive and use Restore archive
+            in Your films to bring back the editable project, with its media
+            verified. Projects also support duplication, search, archival and
+            permanent deletion. Clean old history only after saving any variants
+            you need.
           </p>
         </section>
         <section id="privacy">
@@ -86,9 +104,11 @@ export default function Guide() {
           <p>
             Your projects and media are saved privately to your account. AI
             providers receive selected sources only when you request a provider
-            operation. Your website login is never copied into Cue. Screenshot
-            masks are applied before transfer; review recordings carefully
-            because moving private data needs special care.
+            operation. Your website login is never copied into Cue. Selected
+            element masks also apply while recording. Imported media can be
+            redacted into a separate safe copy, which must be reviewed from
+            start to finish. Automatic masks are not a guarantee: select
+            additional sensitive areas yourself, and check audio as well.
           </p>
           <p>
             Provider keys saved in Settings are encrypted for your account. Each
@@ -101,6 +121,11 @@ export default function Guide() {
             confirmed, check the provider dashboard before retrying.
           </p>
         </section>
+        <p>
+          <Link href="/privacy">
+            Read the full privacy and data-processing policy.
+          </Link>
+        </p>
         <Link className="button" href="/projects">
           Open studio ↗
         </Link>

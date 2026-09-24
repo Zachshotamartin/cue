@@ -1,3 +1,4 @@
+import { assertDataEnvironment } from "./environment";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { Pool, type PoolClient } from "pg";
 import path from "node:path";
@@ -41,6 +42,9 @@ const privateTables = [
   "project_archive",
   "request_limits",
   "schema_migrations",
+  "garbage",
+  "credential_checks",
+  "runtime_environment",
 ];
 function postgresSQL(sql: string) {
   let i = 0;
@@ -63,7 +67,10 @@ CREATE TABLE IF NOT EXISTS uploads (id TEXT PRIMARY KEY, projectId TEXT NOT NULL
 CREATE TABLE IF NOT EXISTS upload_chunks (upload_id TEXT NOT NULL REFERENCES uploads(id) ON DELETE CASCADE, chunk_index INTEGER NOT NULL, object_path TEXT NOT NULL, hash TEXT NOT NULL, PRIMARY KEY(upload_id,chunk_index));
 CREATE TABLE IF NOT EXISTS project_archive (projectId TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE, archivedAt TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS request_limits (key TEXT PRIMARY KEY, window_start BIGINT NOT NULL, count INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS runtime_environment (id INTEGER PRIMARY KEY, environment TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS garbage (object_path TEXT PRIMARY KEY, kind TEXT NOT NULL, created_at BIGINT NOT NULL);
+CREATE TABLE IF NOT EXISTS credential_checks (owner TEXT NOT NULL, provider TEXT NOT NULL, status TEXT NOT NULL, checked_at TEXT NOT NULL, PRIMARY KEY(owner,provider));
 CREATE INDEX IF NOT EXISTS events_project ON events(projectId,id);
 CREATE INDEX IF NOT EXISTS jobs_state ON jobs(state,leaseUntil);
 CREATE INDEX IF NOT EXISTS projects_owner ON projects(owner,updatedAt);
@@ -73,26 +80,83 @@ CREATE INDEX IF NOT EXISTS uploads_project ON uploads(projectId);
 export async function initializeDatabase() {
   if (!ready)
     ready = (async () => {
+      assertDataEnvironment();
       if (pool) {
         const c = await pool.connect();
         try {
           await c.query("BEGIN");
           await c.query("SELECT pg_advisory_xact_lock(735619284)");
-          // Cue uses server-owned SQL transactions. Keep its tables out of the
-          // Supabase public Data API rather than exposing encrypted credentials
-          // or trusting a browser-supplied owner ID.
-          await c.query(
-            "CREATE SCHEMA IF NOT EXISTS cue; REVOKE ALL ON SCHEMA cue FROM PUBLIC",
+          // Do not rerun DDL on every server/worker cold start. Even an
+          // already-enabled RLS ALTER takes an exclusive table lock and can
+          // deadlock with active job transactions. The advisory lock also
+          // serializes the first migration across concurrent processes.
+          const registry = await c.query(
+            "SELECT to_regclass('cue.schema_migrations') AS name",
           );
-          await c.query(postgresSQL(schema));
-          for (const table of privateTables)
+          const applied = registry.rows[0]?.name
+            ? new Set(
+                (
+                  await c.query("SELECT version FROM cue.schema_migrations")
+                ).rows.map((r) => Number(r.version)),
+              )
+            : new Set<number>();
+          if (!applied.has(1) && !applied.has(2)) {
             await c.query(
-              `ALTER TABLE cue."${table}" ENABLE ROW LEVEL SECURITY`,
+              "CREATE SCHEMA IF NOT EXISTS cue; REVOKE ALL ON SCHEMA cue FROM PUBLIC",
             );
-          await c.query(
-            "INSERT INTO cue.schema_migrations VALUES(1,$1) ON CONFLICT DO NOTHING",
-            [new Date().toISOString()],
-          );
+            await c.query(postgresSQL(schema));
+            for (const table of privateTables)
+              await c.query(
+                `ALTER TABLE cue."${table}" ENABLE ROW LEVEL SECURITY`,
+              );
+            await c.query(
+              "INSERT INTO cue.schema_migrations VALUES(1,$1) ON CONFLICT DO NOTHING",
+              [new Date().toISOString()],
+            );
+          }
+          if (!applied.has(2)) {
+            await c.query(
+              postgresSQL(`CREATE TABLE IF NOT EXISTS garbage (object_path TEXT PRIMARY KEY, kind TEXT NOT NULL, created_at BIGINT NOT NULL);
+              CREATE TABLE IF NOT EXISTS credential_checks (owner TEXT NOT NULL, provider TEXT NOT NULL, status TEXT NOT NULL, checked_at TEXT NOT NULL, PRIMARY KEY(owner,provider));`),
+            );
+            for (const table of ["garbage", "credential_checks"])
+              await c.query(
+                `ALTER TABLE cue."${table}" ENABLE ROW LEVEL SECURITY`,
+              );
+            await c.query(
+              "INSERT INTO cue.schema_migrations VALUES(2,$1) ON CONFLICT DO NOTHING",
+              [new Date().toISOString()],
+            );
+          }
+          if (!applied.has(3)) {
+            await c.query(
+              postgresSQL(
+                "CREATE TABLE IF NOT EXISTS runtime_environment (id INTEGER PRIMARY KEY, environment TEXT NOT NULL)",
+              ),
+            );
+            await c.query(
+              'ALTER TABLE cue."runtime_environment" ENABLE ROW LEVEL SECURITY',
+            );
+            await c.query(
+              "INSERT INTO cue.schema_migrations VALUES(3,$1) ON CONFLICT DO NOTHING",
+              [new Date().toISOString()],
+            );
+          }
+          if (process.env.NODE_ENV !== "test") {
+            const expected = process.env.VERCEL_ENV || "development";
+            const tag = await c.query(
+              "SELECT environment FROM cue.runtime_environment WHERE id=1",
+            );
+            if (tag.rows[0] && tag.rows[0].environment !== expected)
+              throw new Error(
+                "This database belongs to a different Cue environment. Configure an isolated database.",
+              );
+            if (!tag.rows.length)
+              await c.query(
+                "INSERT INTO cue.runtime_environment VALUES(1,$1)",
+                [expected],
+              );
+          }
           await c.query("COMMIT");
         } catch (e) {
           await c.query("ROLLBACK");

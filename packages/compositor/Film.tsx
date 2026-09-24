@@ -9,6 +9,9 @@ import {
   staticFile,
   useVideoConfig,
 } from "remotion";
+import { musicGain } from "./captions";
+import { SceneTransition } from "./SceneTransition";
+import { SoundCue } from "./SoundCue";
 
 export function Film(props: FilmProps) {
   const fontUrl = props.fontUrl || staticFile("brand/manrope.woff2");
@@ -41,21 +44,49 @@ export function Film(props: FilmProps) {
       {props.fontUrl && (
         <style>{`@font-face{font-family:Manrope;src:url(${JSON.stringify(props.fontUrl)}) format('woff2');font-weight:200 800;font-display:block}`}</style>
       )}
-      {windows.map(({ s, start, end }) => (
+      {windows.map(({ s, start, end }, index) => (
         <Sequence key={s.id} from={start} durationInFrames={end - start}>
-          <Scene {...props} shot={s} />
+          <SceneTransition
+            {...props}
+            shot={s}
+            previous={props.draft.shots[index - 1]}
+          />
         </Sequence>
       ))}
+      {props.draft.soundCues.map(
+        (cue) =>
+          props.urls[cue.assetId] && (
+            <Sequence
+              key={cue.id}
+              from={Math.round(cue.at * fps)}
+              durationInFrames={Math.max(1, Math.round(cue.duration * fps))}
+            >
+              <SoundCue cue={cue} url={props.urls[cue.assetId]} />
+            </Sequence>
+          ),
+      )}
       {props.draft.musicAssetId && props.urls[props.draft.musicAssetId] && (
         <Audio
           src={props.urls[props.draft.musicAssetId]}
           loop
           volume={(f) => {
-            const speaking = windows.some(
-              (w) => w.s.narrationAssetId && f >= w.start && f < w.end,
+            return (
+              props.draft.musicVolume *
+              musicGain(
+                f / fps,
+                at / fps,
+                windows.map((w) => ({
+                  start: w.start / fps,
+                  end: Math.min(
+                    w.end / fps,
+                    w.start / fps +
+                      (props.assets.find((a) => a.id === w.s.narrationAssetId)
+                        ?.duration || 0),
+                  ),
+                  enabled: !!w.s.narrationAssetId,
+                })),
+              )
             );
-            const edge = Math.min(1, f / 15, Math.max(0, (at - f) / 20));
-            return props.draft.musicVolume * (speaking ? 0.28 : 1) * edge;
           }}
         />
       )}
@@ -63,6 +94,5 @@ export function Film(props: FilmProps) {
   );
 }
 
-import { Scene } from "./Scene";
 import type { FilmProps } from "./types";
 export type { FilmProps } from "./types";

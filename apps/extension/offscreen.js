@@ -1,9 +1,15 @@
+import { RecordingClock } from "./recording-clock.js";
 import {
   beginRecording,
   appendRecordingChunk,
   finishRecording,
   discardRecording,
 } from "./shared.js";
+let metadata,
+  clock,
+  maxSeconds = 60,
+  hardTimeout,
+  audioContext;
 let recorder,
   stream,
   recordingId,
@@ -16,7 +22,7 @@ chrome.runtime.onMessage.addListener((m, sender, reply) => {
   if (m.target !== "offscreen" || sender.id !== chrome.runtime.id) return;
   (async () => {
     if (m.type === "START") {
-      if (recorder?.state === "recording")
+      if (recorder && recorder.state !== "inactive")
         throw new Error("Already recording.");
       discard = false;
       bytes = 0;
@@ -24,7 +30,14 @@ chrome.runtime.onMessage.addListener((m, sender, reply) => {
       writes = Promise.resolve();
       recordingId = crypto.randomUUID();
       stream = await navigator.mediaDevices.getUserMedia({
-        audio: false,
+        audio: m.audio
+          ? {
+              mandatory: {
+                chromeMediaSource: "tab",
+                chromeMediaSourceId: m.streamId,
+              },
+            }
+          : false,
         video: {
           mandatory: {
             chromeMediaSource: "tab",
@@ -33,7 +46,14 @@ chrome.runtime.onMessage.addListener((m, sender, reply) => {
           },
         },
       });
-      await beginRecording(recordingId, m.metadata);
+      metadata = { ...m.metadata, interactions: [] };
+      if (m.audio && stream.getAudioTracks().length) {
+        audioContext = new AudioContext();
+        audioContext
+          .createMediaStreamSource(stream)
+          .connect(audioContext.destination);
+      }
+      await beginRecording(recordingId, metadata);
       const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
         ? "video/webm;codecs=vp9"
         : "video/webm";
@@ -53,6 +73,8 @@ chrome.runtime.onMessage.addListener((m, sender, reply) => {
       };
       recorder.onstop = async () => {
         clearTimeout(timeout);
+        clearTimeout(hardTimeout);
+        audioContext?.close().catch(() => {});
         stream.getTracks().forEach((t) => t.stop());
         try {
           await writes;
@@ -78,14 +100,40 @@ chrome.runtime.onMessage.addListener((m, sender, reply) => {
           });
         }
       };
+      clock = new RecordingClock();
+      maxSeconds = Math.min(180, Math.max(15, Number(m.maxSeconds) || 60));
       recorder.start(1000);
       timeout = setTimeout(
-        () => recorder.state === "recording" && recorder.stop(),
-        60000,
+        () => recorder.state !== "inactive" && recorder.stop(),
+        maxSeconds * 1000,
+      );
+      hardTimeout = setTimeout(
+        () => recorder.state !== "inactive" && recorder.stop(),
+        600000,
+      );
+    } else if (m.type === "EVENT" && recorder?.state === "recording") {
+      if (metadata.interactions.length < 500) {
+        metadata.interactions.push({
+          ...m.event,
+          at: clock.elapsed(),
+        });
+        writes = writes.then(() => beginRecording(recordingId, metadata));
+        await writes;
+      }
+    } else if (m.type === "PAUSE" && recorder?.state === "recording") {
+      clock.pause();
+      clearTimeout(timeout);
+      recorder.pause();
+    } else if (m.type === "RESUME" && recorder?.state === "paused") {
+      clock.resume();
+      recorder.resume();
+      timeout = setTimeout(
+        () => recorder.state !== "inactive" && recorder.stop(),
+        Math.max(0, maxSeconds - clock.elapsed()) * 1000,
       );
     } else if (m.type === "STOP") {
       discard = !!m.discard;
-      if (recorder?.state === "recording") recorder.stop();
+      if (recorder && recorder.state !== "inactive") recorder.stop();
     }
     return true;
   })()

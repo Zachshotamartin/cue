@@ -40,7 +40,7 @@ async function upload(projectId: string, file: string) {
   return (await response.json()).asset;
 }
 const health = await api("health");
-assert.equal(health.mode, "account");
+assert.equal(health.ok, true);
 const { project: p } = await api("projects", "POST", {
   title: "Cue render verification",
   siteUrl: origin,
@@ -63,7 +63,7 @@ const audio = await upload(p.id, tone);
 await fs.unlink(tone);
 let revision = p.revision;
 const outputs = [];
-for (const format of ["landscape", "portrait"] as const) {
+for (const format of ["landscape", "portrait", "square"] as const) {
   const draft = {
     ...p.draft,
     format,
@@ -80,6 +80,7 @@ for (const format of ["landscape", "portrait"] as const) {
         prompt: "",
         motion: "push",
         narrationAssetId: audio.id,
+        speechCues: [{ start: 0, end: 1, text: "Your product. In motion." }],
       }),
     ],
   };
@@ -127,7 +128,7 @@ for (const format of ["landscape", "portrait"] as const) {
   const info = await inspect(file),
     video = info.streams.find((s: any) => s.codec_type === "video");
   assert.equal(video.width, format === "landscape" ? 1920 : 1080);
-  assert.equal(video.height, format === "landscape" ? 1080 : 1920);
+  assert.equal(video.height, format === "portrait" ? 1920 : 1080);
   assert(info.streams.some((s: any) => s.codec_type === "audio"));
   assert(Math.abs(Number(info.format.duration) - 2) < 0.1);
   await run("ffmpeg", [

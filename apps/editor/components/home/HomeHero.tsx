@@ -3,7 +3,7 @@ import Link from "next/link";
 import { ArrowUpRight, ArrowRight } from "@phosphor-icons/react/dist/ssr";
 export function HomeHero() {
   return (
-    <section className="hero">
+    <section className="hero theme-dark">
       <div className="hero-copy">
         <p className="eyebrow">A director for your website</p>
         <h1>

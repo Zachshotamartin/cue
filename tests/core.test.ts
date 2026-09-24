@@ -1,43 +1,47 @@
+// Install the auth mock before the API module initializes its client.
 import { account } from "./auth-fixture";
-import { afterAll, describe, expect, it } from "vitest";
+
+import ffmpeg from "ffmpeg-static";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
-import ffmpeg from "ffmpeg-static";
-import { randomUUID } from "node:crypto";
+import { afterAll, describe, expect, it } from "vitest";
+import { family, normalizeRoute } from "../apps/extension/shared.js";
+import { shotSchema } from "../packages/contracts";
+import { applyPlan } from "../packages/director";
+import { handle } from "../packages/server/api";
 import {
-  createProject,
-  editProject,
-  enqueue,
-  budget,
-  claimJob,
-  updateJob,
-  addTake,
-  takes,
-  db,
-  assets,
-  validateRender,
-  now,
-} from "../packages/storage/db";
-import { writeObject } from "../packages/storage/objects";
-import { origin, dataDir } from "../packages/storage/config";
-import {
-  assertOwner,
   assertCapture,
+  assertOwner,
   createPairing,
   exchangePairing,
 } from "../packages/storage/auth";
+import { dataDir, origin } from "../packages/storage/config";
 import {
-  putCredential,
   credential,
   decryptCredential,
   encryptCredential,
+  putCredential,
 } from "../packages/storage/credentials";
-import { importMedia, assetPath, run, hash } from "../packages/storage/media";
-import { shotSchema } from "../packages/contracts";
-import { handle } from "../packages/server/api";
-import { applyPlan } from "../packages/director";
-import { normalizeRoute, family } from "../apps/extension/shared.js";
+import {
+  addAsset,
+  addTake,
+  assets,
+  budget,
+  claimJob,
+  createProject,
+  db,
+  editProject,
+  enqueue,
+  now,
+  takes,
+  updateJob,
+  updateAssetMetadata,
+  validateRender,
+} from "../packages/storage/db";
+import { hash, importMedia, run } from "../packages/storage/media";
+import { writeObject } from "../packages/storage/objects";
 const png = () =>
   sharp({
     create: { width: 96, height: 64, channels: 3, background: "#df603c" },
@@ -399,6 +403,15 @@ describe("media and resumable uploads", () => {
       );
     expect((await upload()).status).toBe(200);
     expect((await upload()).status).toBe(200);
+    const resumed = await (
+      await call(`projects/${p.id}/uploads`, "POST", {
+        name: "chunk.png",
+        bytes: bytes.length,
+        hash: hash(bytes),
+      })
+    ).json();
+    expect(resumed.id).toBe(init.id);
+    expect(resumed.received).toEqual([0]);
     const first = await (
       await call(`uploads/${init.id}/complete`, "POST")
     ).json();
@@ -488,4 +501,91 @@ describe("creative direction", () => {
     expect(energetic.shots[0].duration).toBeLessThan(minimal.shots[0].duration);
     expect(energetic.shots[0].transition).toBe("cut");
   });
+});
+
+it("scopes audio rights edits to the owner and preserves privacy flags", async () => {
+  const p = await createProject("Rights fixture"),
+    a = await importMedia(p.id, await png(), "rights.png", {});
+  await db
+    .prepare("UPDATE assets SET data=? WHERE id=?")
+    .run(JSON.stringify({ ...a, metadata: { privacyPending: true } }), a.id);
+  const route = `assets/${a.id}/rights`,
+    rights = {
+      credit: "Test creator",
+      license: "Test permission",
+      sourceUrl: "https://example.test/license",
+    };
+  const success = await call(route, "PATCH", rights);
+  expect(success.status).toBe(200);
+  expect((await assets(p.id))[0].metadata).toMatchObject({
+    privacyPending: true,
+    rights,
+  });
+  const original = account.user;
+  account.user = { ...original!, id: "another-account" };
+  try {
+    expect((await call(route, "PATCH", rights)).status).toBe(404);
+  } finally {
+    account.user = original;
+  }
+  expect(
+    (await call(route, "PATCH", rights, { origin: "https://wrong.example" }))
+      .status,
+  ).toBe(403);
+});
+
+it("plans a first demonstration from uploaded footage before any scene exists", async () => {
+  const previousUser = account.user;
+  const owner = `first-demo-${randomUUID()}`;
+  account.user = {
+    id: owner,
+    name: "Fixture",
+    email: "fixture@example.test",
+    emailVerified: true,
+  };
+  try {
+    const p = await createProject("First demo", "", owner);
+    const saved = await editProject(p.id, p.revision, {
+      ...p.draft,
+      objective: "demonstration",
+    });
+    await putCredential(
+      owner,
+      "openai",
+      "fixture-planner-key-no-provider-call",
+    );
+    const plan = () =>
+      call(
+        `projects/${p.id}/plan`,
+        "POST",
+        { revision: saved.revision, provider: "openai" },
+        { "idempotency-key": randomUUID() },
+      );
+    expect((await plan()).status).toBe(400);
+    const id = randomUUID();
+    await addAsset({
+      id,
+      projectId: p.id,
+      kind: "video",
+      name: "Real workflow",
+      mime: "video/mp4",
+      path: `${id}.mp4`,
+      bytes: 10,
+      duration: 20,
+      width: 1280,
+      height: 720,
+      hash: "a".repeat(64),
+      metadata: {},
+      createdAt: now(),
+    });
+    const response = await plan();
+    expect(response.status).toBe(202);
+    const { job } = await response.json();
+    expect(job.payload.draft.shots).toHaveLength(0);
+    expect(job.payload.evidence).toEqual([{ id, hash: "a".repeat(64) }]);
+    await updateAssetMetadata(id, { privacyPending: true });
+    expect((await plan()).status).toBe(400);
+  } finally {
+    account.user = previousUser;
+  }
 });

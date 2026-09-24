@@ -1,4 +1,5 @@
 "use client";
+import { useState } from "react";
 import { Check } from "@phosphor-icons/react";
 import { plannerLabel, type Shot } from "../../../../packages/contracts";
 import { api } from "../client-api";
@@ -8,6 +9,7 @@ import { Modal } from "../ui/Modal";
 import { ProposalScene } from "./ProposalScene";
 
 export function ProposalDialog() {
+  const [candidate, setCandidate] = useState("");
   const {
     id,
     busy,
@@ -17,6 +19,9 @@ export function ProposalDialog() {
     savedRevision,
     proposals,
   } = useEditor();
+  const proposal = proposals.find((j) => j.id === showProposal);
+  const scoped = !!proposal?.payload.scopeShotId;
+  const chosen = candidate || proposal?.payload.result.shots[0]?.id;
   return (
     <>
       <Modal
@@ -39,7 +44,20 @@ export function ProposalDialog() {
         {proposals
           .find((j) => j.id === showProposal)
           ?.payload.result.shots.map((s: Shot, i: number) => (
-            <ProposalScene key={s.id || i} s={s} i={i} />
+            <div key={s.id || i}>
+              <ProposalScene s={s} i={i} />
+              {scoped && (
+                <Button
+                  className="button secondary"
+                  aria-pressed={chosen === s.id}
+                  onClick={() => setCandidate(s.id)}
+                >
+                  {chosen === s.id
+                    ? "Selected alternative"
+                    : "Choose this alternative"}
+                </Button>
+              )}
+            </div>
           ))}
         <Button
           className="button"
@@ -49,13 +67,18 @@ export function ProposalDialog() {
               const revision = await savedRevision();
               await api(`/projects/${id}/apply-plan`, {
                 method: "POST",
-                body: JSON.stringify({ revision, jobId: showProposal }),
+                body: JSON.stringify({
+                  revision,
+                  jobId: showProposal,
+                  sceneId: scoped ? chosen : undefined,
+                }),
               });
               setShowProposal(null);
             })
           }
         >
-          Use this storyboard <Check size={17} />
+          {scoped ? "Replace selected scene" : "Use this storyboard"}{" "}
+          <Check size={17} />
         </Button>
       </Modal>
     </>

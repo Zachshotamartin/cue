@@ -1,268 +1,67 @@
 "use client";
+import { useFilmPersistence } from "./useFilmPersistence";
+import { useJobNotifications } from "./useJobNotifications";
 import { type PlayerRef } from "@remotion/player";
 import { useRouter } from "next/navigation";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   shotSchema,
   type Asset,
-  type Draft,
   type Shot,
-  type Snapshot,
+  type Provider,
 } from "../../../../packages/contracts";
 import { api } from "../client-api";
+import { uploadMedia } from "../upload-media";
+import { patchShot } from "../../../../packages/director/editing";
 import { useWorkspaceLayout } from "./useWorkspaceLayout";
 export type InspectorTab = "scene" | "generate" | "audio" | "brand" | "export";
-function clearRecovery(key: string) {
-  try {
-    localStorage.removeItem(key);
-  } catch {
-    /* Cloud saves remain authoritative when browser storage is unavailable. */
-  }
-}
-
 export function useEditorController(id: string) {
   const router = useRouter();
   const workspace = useWorkspaceLayout();
-  const [snap, setSnap] = useState<Snapshot | null>(null),
-    [draft, setDraft] = useState<Draft | null>(null),
-    [selected, setSelected] = useState(""),
+  const [selected, setSelected] = useState(""),
     [library, setLibrary] = useState<"scenes" | "captures">("scenes"),
     [tab, updateTab] = useState<InspectorTab>("scene");
   function setTab(tab: InspectorTab) {
     updateTab(tab);
     workspace.collapse("right", false);
   }
-  const [dirty, setDirty] = useState(false),
-    dirtyRef = useRef(false),
-    [error, setError] = useState(""),
+  const [error, setError] = useState(""),
     [notice, setNotice] = useState(""),
     [busy, setBusy] = useState(""),
-    [pairing, setPairing] = useState<any>(null),
+    [pairing, setPairing] = useState<{
+      code: string;
+      expiresIn: number;
+      origin: string;
+    } | null>(null),
     [captureOpen, setCaptureOpen] = useState(false),
     [model, setModel] = useState("gen4_turbo"),
     [seconds, setSeconds] = useState(5),
     [voice, setVoice] = useState(""),
-    [providers, setProviders] = useState<any[]>([]),
+    [providers, setProviders] = useState<
+      { provider: Provider; configured: boolean; suffix?: string }[]
+    >([]),
     [showProposal, setShowProposal] = useState<string | null>(null);
-  const player = useRef<PlayerRef>(null),
-    input = useRef<HTMLInputElement>(null),
-    dragId = useRef(""),
-    history = useRef<Draft[]>([]),
-    future = useRef<Draft[]>([]);
-  const observedJobs = useRef(new Map<string, string>());
-  const actionFlight = useRef(false);
+  const persistence = useFilmPersistence(id, setError);
+  const { snap, draft, draftRef, dirtyRef, mutate, save, refresh } =
+    persistence;
   useEffect(() => {
-    for (const job of snap?.jobs || []) {
-      const previous = observedJobs.current.get(job.id);
-      if (previous && previous !== job.state) {
-        if (job.state === "completed")
-          setNotice(
-            job.kind === "render"
-              ? "Your film is ready. Open Export to watch or download it."
-              : job.kind === "generate"
-                ? "A new take is ready in Generate."
-                : job.kind === "plan"
-                  ? "Your storyboard proposal is ready in Brief."
-                  : "Narration is ready in Audio.",
-          );
-        if (job.state === "failed" || job.state === "unknown")
-          setError(
-            job.error || "A job needs attention. Open Export for details.",
-          );
-      }
-      observedJobs.current.set(job.id, job.state);
-    }
-  }, [snap]);
-  const [saveState, setSaveState] = useState("Saved"),
-    [conflict, setConflict] = useState(false);
-  const [recovery, setRecovery] = useState<{
-    draft: Draft;
-    revision: number;
-  } | null>(null);
-  const baseRevision = useRef(0),
-    ownerRef = useRef(""),
-    saveFlight = useRef<Promise<any> | null>(null),
-    firstLoad = useRef(true);
-  const conflictRef = useRef(false);
-  const recoveryKey = () => `cue:recovery:${ownerRef.current}:${id}`;
-  function preserve(value: Draft, revision = baseRevision.current) {
-    if (!ownerRef.current) return;
-    try {
-      localStorage.setItem(
-        recoveryKey(),
-        JSON.stringify({ draft: value, revision, at: Date.now() }),
-      );
-    } catch {
-      setSaveState(
-        "Browser recovery unavailable — keep this tab open until saved",
-      );
-    }
-  }
-  const draftRef = useRef<Draft | null>(null);
-  draftRef.current = draft;
-  const refresh = useCallback(async () => {
-    const data = await api<Snapshot>(`/projects/${id}`);
-    ownerRef.current = data.project.owner;
-    setSnap(data);
-    if (!dirtyRef.current && !saveFlight.current) {
-      baseRevision.current = data.project.revision;
-      setDraft(data.project.draft);
-      draftRef.current = data.project.draft;
-    }
-    if (firstLoad.current) {
-      firstLoad.current = false;
-      try {
-        const raw = localStorage.getItem(recoveryKey());
-        if (raw) {
-          const r = JSON.parse(raw);
-          if (
-            r.draft &&
-            JSON.stringify(r.draft) !== JSON.stringify(data.project.draft)
-          )
-            setRecovery(r);
-          else clearRecovery(recoveryKey());
-        }
-      } catch {}
-    }
-  }, [id]);
-  useEffect(() => {
-    refresh().catch((e) => setError(e.message));
     api("/settings")
       .then((x) => {
         setProviders(x.providers);
         setVoice(x.voiceId);
       })
       .catch(() => {});
-    const timer = setInterval(() => {
-      if (document.visibilityState === "visible") refresh().catch(() => {});
-    }, 4000);
-    const visible = () => {
-      if (document.visibilityState === "visible") refresh().catch(() => {});
-    };
-    document.addEventListener("visibilitychange", visible);
-    return () => {
-      clearInterval(timer);
-      document.removeEventListener("visibilitychange", visible);
-    };
-  }, [id, refresh]);
-  useEffect(() => {
-    const before = (e: BeforeUnloadEvent) => {
-      if (dirtyRef.current) {
-        e.preventDefault();
-        e.returnValue = "";
-      }
-    };
-    window.addEventListener("beforeunload", before);
-    return () => window.removeEventListener("beforeunload", before);
   }, []);
-  function mutate(fn: (d: Draft) => void) {
-    if (!draftRef.current) return;
-    history.current.push(structuredClone(draftRef.current));
-    history.current = history.current.slice(-60);
-    future.current = [];
-    const d = structuredClone(draftRef.current);
-    fn(d);
-    draftRef.current = d;
-    setDraft(d);
-    dirtyRef.current = true;
-    setDirty(true);
-    setSaveState("Unsaved changes");
-    preserve(d);
-  }
-  function undo(redo = false) {
-    const source = redo ? future.current : history.current,
-      target = redo ? history.current : future.current,
-      d = source.pop();
-    if (!d || !draftRef.current) return;
-    target.push(draftRef.current);
-    draftRef.current = d;
-    setDraft(d);
-    dirtyRef.current = true;
-    setDirty(true);
-    setSaveState("Unsaved changes");
-    preserve(d);
-  }
-  async function save(): Promise<any> {
-    if (saveFlight.current) return saveFlight.current;
-    if (conflictRef.current)
-      throw new Error("Resolve the save conflict before continuing.");
-    if (!draftRef.current || !baseRevision.current) return;
-    const operation = (async () => {
-      let result: any;
-      while (dirtyRef.current) {
-        const value = draftRef.current!;
-        setSaveState("Saving…");
-        preserve(value);
-        try {
-          const r = await api(`/projects/${id}/edits`, {
-            method: "POST",
-            body: JSON.stringify({
-              revision: baseRevision.current,
-              draft: value,
-              label: "Edit film",
-            }),
-          });
-          result = r.project;
-          baseRevision.current = r.project.revision;
-          setSnap(
-            (previous) => previous && { ...previous, project: r.project },
-          );
-          if (draftRef.current === value) {
-            dirtyRef.current = false;
-            setDirty(false);
-            clearRecovery(recoveryKey());
-            setSaveState("Saved to your account");
-          } else preserve(draftRef.current!);
-        } catch (e: any) {
-          if (e.status === 409) {
-            conflictRef.current = true;
-            setConflict(true);
-            setSaveState("Changes in another tab — resolve conflict");
-          } else setSaveState("Not saved — edits kept in this browser");
-          throw e;
-        }
-      }
-      return result || snap?.project;
-    })();
-    saveFlight.current = operation;
-    try {
-      return await operation;
-    } finally {
-      saveFlight.current = null;
-    }
-  }
-  useEffect(() => {
-    if (!dirty || conflict) return;
-    const timer = setTimeout(() => {
-      save().catch(() => {});
-    }, 900);
-    return () => clearTimeout(timer);
-  }, [draft, dirty, conflict]);
-  useEffect(() => {
-    const online = () => {
-      if (dirtyRef.current && !conflictRef.current) save().catch(() => {});
-    };
-    window.addEventListener("online", online);
-    return () => window.removeEventListener("online", online);
-  }, []);
-  async function resolveSave(keepEdits: boolean) {
-    const latest = await api<Snapshot>(`/projects/${id}`);
-    baseRevision.current = latest.project.revision;
-    setSnap(latest);
-    conflictRef.current = false;
-    setConflict(false);
-    if (keepEdits) {
-      await save();
-    } else {
-      setDraft(latest.project.draft);
-      draftRef.current = latest.project.draft;
-      dirtyRef.current = false;
-      setDirty(false);
-      clearRecovery(recoveryKey());
-      setSaveState("Saved to your account");
-    }
-  }
-  async function action(name: string, fn: () => Promise<any>) {
+  const player = useRef<PlayerRef>(null),
+    input = useRef<HTMLInputElement>(null),
+    dragId = useRef("");
+  const observedJobs = useJobNotifications(
+    snap?.jobs || [],
+    setNotice,
+    setError,
+  );
+  const actionFlight = useRef(false);
+  async function action(name: string, fn: () => Promise<unknown>) {
     if (actionFlight.current) return;
     actionFlight.current = true;
     setBusy(name);
@@ -290,13 +89,6 @@ export function useEditorController(id: string) {
       router.push(href);
     });
   }
-  async function savedRevision() {
-    if (dirtyRef.current) {
-      const p = await save();
-      return p?.revision;
-    }
-    return snap?.project.revision;
-  }
   function choose(shot: Shot) {
     setSelected(shot.id);
     setTab("scene");
@@ -315,7 +107,7 @@ export function useEditorController(id: string) {
     if (shot)
       mutate((d) => {
         const s = d.shots.find((x) => x.id === shot.id)!;
-        Object.assign(s, patch);
+        Object.assign(s, patchShot(s, patch));
       });
   }
   function move(shotId: string, at: number) {
@@ -327,14 +119,29 @@ export function useEditorController(id: string) {
     });
   }
   function addScene(asset?: Asset) {
+    if (draft!.shots.length >= 30) {
+      setNotice(
+        "A film supports up to 30 scenes. Remove or shorten an existing sequence first.",
+      );
+      return;
+    }
     const s = shotSchema.parse({
       id: crypto.randomUUID(),
-      title: asset?.metadata.state || asset?.name || "New scene",
+      title: String(asset?.metadata.state || asset?.name || "New scene").slice(
+        0,
+        100,
+      ),
       assetId: asset?.id || null,
       template: "showcase",
       mode: "exact-ui",
-      duration: 5,
-      caption: asset?.metadata.title || "",
+      duration:
+        asset?.kind === "video"
+          ? Math.max(
+              1,
+              Math.min(5, Math.floor((asset.duration || 5) * 30) / 30),
+            )
+          : 5,
+      caption: String(asset?.metadata.title || "").slice(0, 140),
       prompt:
         "A gentle, deliberate camera push toward the main product area. Preserve the interface layout.",
       motion: "push",
@@ -348,32 +155,7 @@ export function useEditorController(id: string) {
   async function upload(files: FileList | File[]) {
     await action("upload", async () => {
       for (const file of Array.from(files)) {
-        if (file.size > 64 * 1024 * 1024)
-          throw new Error(`${file.name} exceeds 64 MiB.`);
-        const buffer = await file.arrayBuffer();
-        const digest = Array.from(
-          new Uint8Array(await crypto.subtle.digest("SHA-256", buffer)),
-        )
-          .map((x) => x.toString(16).padStart(2, "0"))
-          .join("");
-        const upload = await api(`/projects/${id}/uploads`, {
-          method: "POST",
-          body: JSON.stringify({
-            name: file.name,
-            bytes: file.size,
-            hash: digest,
-          }),
-        });
-        for (let i = 0; i < upload.chunks; i++)
-          await api(`/uploads/${upload.id}/chunks/${i}`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/octet-stream" },
-            body: buffer.slice(
-              i * 1048576,
-              Math.min(buffer.byteLength, (i + 1) * 1048576),
-            ),
-          });
-        await api(`/uploads/${upload.id}/complete`, { method: "POST" });
+        await uploadMedia(id, file);
       }
       setLibrary("captures");
       setNotice("Media added to the capture library.");
@@ -403,22 +185,16 @@ export function useEditorController(id: string) {
   const total = draft?.shots.reduce((n, s) => n + s.duration, 0) || 0;
 
   return {
+    ...persistence,
     workspace,
     id,
     router,
-    snap,
-    setSnap,
-    draft,
-    setDraft,
     selected,
     setSelected,
     library,
     setLibrary,
     tab,
     setTab,
-    dirty,
-    setDirty,
-    dirtyRef,
     error,
     setError,
     notice,
@@ -433,8 +209,11 @@ export function useEditorController(id: string) {
     setModel,
     seconds,
     setSeconds,
-    voice,
-    setVoice,
+    voice: draft?.narrationVoiceId || voice,
+    setVoice: (value: string) =>
+      mutate((d) => {
+        d.narrationVoiceId = value.slice(0, 80);
+      }),
     providers,
     setProviders,
     showProposal,
@@ -442,31 +221,9 @@ export function useEditorController(id: string) {
     player,
     input,
     dragId,
-    history,
-    future,
     observedJobs,
-    saveState,
-    setSaveState,
-    conflict,
-    setConflict,
-    recovery,
-    setRecovery,
-    baseRevision,
-    ownerRef,
-    saveFlight,
-    firstLoad,
-    conflictRef,
-    recoveryKey,
-    preserve,
-    draftRef,
-    refresh,
-    mutate,
-    undo,
-    save,
-    resolveSave,
     action,
     leave,
-    savedRevision,
     choose,
     shot,
     editShot,

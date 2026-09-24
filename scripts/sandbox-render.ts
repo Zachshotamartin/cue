@@ -1,3 +1,4 @@
+import { finalizeFilm } from "../packages/compositor/output";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { bundle } from "@remotion/bundler";
@@ -76,6 +77,11 @@ try {
     },
   });
   await Promise.all(updates);
+  await finalizeFilm("/tmp/film.mp4", {
+    width: composition.width,
+    height: composition.height,
+    duration: composition.durationInFrames / composition.fps,
+  });
   await upload("/tmp/film.mp4", "video");
   try {
     await renderStill({

@@ -9,6 +9,8 @@ import {
 } from "remotion";
 import type { Shot } from "../contracts";
 import type { FilmProps } from "./types";
+import { SpeechCaptions } from "./SpeechCaptions";
+import { SceneEmphasis } from "./SceneEmphasis";
 import { Visual } from "./Visual";
 export function Scene({
   shot,
@@ -38,15 +40,20 @@ export function Scene({
   const ty = shot.motion === "float" ? Math.sin(p * Math.PI) * -1.5 : 0;
   const opacity =
     shot.transition === "fade"
-      ? interpolate(
-          frame,
-          [0, 8, Math.max(9, total - 9), total - 1],
-          [0, 1, 1, 0],
-          { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
-        )
+      ? interpolate(frame, [0, 8], [0, 1], {
+          extrapolateLeft: "clamp",
+          extrapolateRight: "clamp",
+        })
       : 1;
   const baseFont = width * (portrait ? 0.072 : 0.035);
-  const r = shot.focalRect;
+  const start = shot.focalRect;
+  const end = shot.focalEnd || start;
+  const r = {
+    x: interpolate(ease, [0, 1], [start.x, end.x]),
+    y: interpolate(ease, [0, 1], [start.y, end.y]),
+    width: interpolate(ease, [0, 1], [start.width, end.width]),
+    height: interpolate(ease, [0, 1], [start.height, end.height]),
+  };
   const cropped = r.width < 0.99 || r.height < 0.99;
   const ratio =
     source?.width && source?.height
@@ -62,8 +69,10 @@ export function Scene({
         objectFit: "fill",
       }
     : { width: "100%", height: "100%", objectFit: "contain", display: "block" };
-  const frameWidth = width * (portrait ? 0.88 : 0.82),
-    frameHeight = height * (portrait ? 0.57 : 0.66),
+  const frameWidth =
+      width * (shot.presentation === "full" ? 0.96 : portrait ? 0.88 : 0.82),
+    frameHeight =
+      height * (shot.presentation === "full" ? 0.78 : portrait ? 0.57 : 0.66),
     fitWidth = Math.min(frameWidth, frameHeight * ratio),
     fitHeight = fitWidth / ratio;
   const title = shot.caption || shot.title;
@@ -71,6 +80,7 @@ export function Scene({
   return (
     <AbsoluteFill
       style={{
+        opacity,
         backgroundColor: shot.background,
         color: foreground,
         fontFamily: `${draft.brand.font}, Arial, sans-serif`,
@@ -83,6 +93,7 @@ export function Scene({
             asset={generated}
             url={urls[generated.id]}
             style={{ width: "100%", height: "100%", objectFit: "cover" }}
+            playbackRate={shot.playbackRate}
             trimStart={shot.trimStart}
             fps={fps}
           />
@@ -90,7 +101,6 @@ export function Scene({
       )}
       <AbsoluteFill
         style={{
-          opacity,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -129,7 +139,7 @@ export function Scene({
                 maxWidth: "90%",
               }}
             >
-              {draft.title}
+              {draft.productName || draft.title}
             </div>
             <div
               style={{
@@ -143,6 +153,20 @@ export function Scene({
             >
               {title}
             </div>
+            {draft.ctaUrl && (
+              <div
+                style={{
+                  fontSize: baseFont * 0.5,
+                  marginTop: height * 0.035,
+                  textAlign: "center",
+                  maxWidth: "86%",
+                  overflowWrap: "anywhere",
+                  color: draft.brand.accent,
+                }}
+              >
+                {draft.ctaUrl.replace(/^https?:\/\//, "").replace(/\/$/, "")}
+              </div>
+            )}
           </>
         ) : (
           <>
@@ -166,7 +190,7 @@ export function Scene({
                   background: draft.brand.accent,
                 }}
               />
-              {draft.title}
+              {draft.productName || draft.title}
             </div>
             <div
               style={{
@@ -214,6 +238,7 @@ export function Scene({
                         height: "100%",
                         objectFit: "contain",
                       }}
+                      playbackRate={shot.playbackRate}
                       trimStart={shot.trimStart}
                       fps={fps}
                     />
@@ -238,17 +263,27 @@ export function Scene({
                 }}
               >
                 <Visual
+                  volume={
+                    shot.mode === "generated-video" ? 0 : shot.sourceAudioVolume
+                  }
                   asset={source}
                   url={source && urls[source.id]}
                   style={visualStyle}
+                  playbackRate={shot.playbackRate}
                   trimStart={shot.trimStart}
                   fps={fps}
+                />
+                <SceneEmphasis
+                  shot={shot}
+                  accent={draft.brand.accent}
+                  crop={r}
                 />
               </div>
             )}
           </>
         )}
       </AbsoluteFill>
+      <SpeechCaptions cues={shot.speechCues} />
       {shot.narrationAssetId && urls[shot.narrationAssetId] && (
         <Audio src={urls[shot.narrationAssetId]} volume={0.85} />
       )}

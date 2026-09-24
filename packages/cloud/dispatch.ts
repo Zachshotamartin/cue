@@ -1,4 +1,3 @@
-import type { Job } from "../contracts";
 import { getJob, updateJob } from "../storage/db";
 // The Workflow implementation is loaded only by the deployed app, not the local CLI worker.
 export async function dispatchJob(id: string) {

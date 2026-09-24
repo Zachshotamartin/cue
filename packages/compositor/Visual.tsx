@@ -8,19 +8,25 @@ export function Visual({
   style,
   trimStart = 0,
   fps,
+  playbackRate = 1,
+  volume = 0,
 }: {
   asset?: Asset;
   url?: string;
   style: React.CSSProperties;
   trimStart?: number;
   fps: number;
+  playbackRate?: number;
+  volume?: number;
 }) {
   if (!asset || !url) return null;
   return asset.kind === "video" ? (
     <OffthreadVideo
       src={url}
       startFrom={Math.round(trimStart * fps)}
-      muted
+      playbackRate={playbackRate}
+      muted={volume === 0}
+      volume={volume}
       style={style}
     />
   ) : (

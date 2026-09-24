@@ -10,6 +10,10 @@ await fs.mkdir(path.join(root, "apps/editor/public/downloads"), {
 });
 await fs.rm(dir, { recursive: true, force: true });
 await fs.cp(path.join(root, "apps/extension"), dir, { recursive: true });
+await fs.copyFile(
+  path.join(root, "apps/editor/public/brand/cue-logo.svg"),
+  path.join(dir, "cue-logo.svg"),
+);
 await sharp(path.join(root, "apps/editor/public/brand/cue-icon.svg"))
   .png()
   .toFile(path.join(dir, "icon.png"));

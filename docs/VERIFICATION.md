@@ -1,75 +1,63 @@
-# Production upgrade verification — September 23, 2026
+# Cue workflow verification — September 23, 2026
 
-The application now uses Supabase Auth and PostgreSQL, private Vercel Blob assets, and account-owned encrypted provider credentials. The public source repository is https://github.com/Zachshotamartin/cue. Vercel was deployed manually to https://cue-tau-green.vercel.app.
+This record separates current local evidence from earlier production/provider tests. The production site has **not** received the workflow changes in this PR. Scope and release gates are in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
 
-## Verified for the current implementation
+## Current branch: automated and database checks
 
-- TypeScript, the optimized Next.js/Workflow build, and **68 automated checks** pass. Auth checks cover CSRF, password validation, email callback redirects, token-free JSON, recovery authentication, throttling and bounded request bodies. Existing checks cover tenant isolation, revisions, uploads, encryption and provider-job recovery.
-- A real Supabase database passed migrations, owner isolation, concurrent revision conflicts, job idempotency/budget reservations, exclusive claims, rate limits and saved snapshots. Synthetic verification rows were cleaned up. Database TLS verifies the provider CA and hostname; SSL is enforced server-side.
-- Cue tables live in the private cue schema with RLS enabled and no public grants. Anonymous Supabase Data API access to that schema was rejected with PGRST106.
-- The private Vercel Blob store passed authenticated write/read and rejected anonymous reads. Production dependency audit reported zero known vulnerabilities after the Supabase migration.
-- Vercel upload inputs were audited. Environment files, local databases, test data and provisioning credentials are excluded explicitly by .vercelignore.
+- `npm run typecheck`: passes.
+- `npm test`: **123 tests across 19 files pass**. Coverage includes ownership/CSRF, revision conflicts, encrypted credentials, resumable uploads, provider wire contracts, timed captions, capture pause/event timing, route bounds, evidence relevance, trim/split/crop timing, privacy exclusions, scoped story revision, lifecycle/restore, unknown paid submissions, queue fairness, spending reservations and environment guards.
+- `npm run build`: extension packaging and optimized Next.js/Workflow production build pass.
+- `npm audit --omit=dev`: zero reported vulnerabilities at verification time.
+- `scripts/verify-postgres.ts` passes against a dedicated local PostgreSQL database. Checks include tenant isolation, concurrent edits, idempotency/budgets, exclusive job claims, rate limits, snapshots and simultaneous analysis/rights/privacy metadata updates. The script removes only its own synthetic rows.
+- Review caught and corrected lost privacy flags during concurrent metadata writes, generated footage being offered as product evidence, an incorrect voice-picker endpoint, edit operations that could exceed the scene limit, and a first-story check that incorrectly required recordings to already be on the timeline. Stale poll responses also cannot replace a newly acknowledged save.
 
-The OpenAI/Claude planner addition passed mocked wire-contract tests, provider-specific encrypted key isolation, saved per-film selection, queue routing, legacy Gemini compatibility and refusal/truncation handling. These tests do not certify real paid provider responses.
+Commands for repeating the non-browser integration checks:
 
-## Verified on the deployed application
+```sh
+# Dedicated disposable verification database only; never the production database.
+CUE_VERIFY_DATABASE=1 NODE_ENV=test DATABASE_URL='postgresql://localhost/cue_verification' npx tsx scripts/verify-postgres.ts
+npx tsx scripts/verify-compositor.ts
+```
 
-- Two synthetic Supabase accounts signed in through Cue. Session cookies were HTTP-only, Secure and SameSite=Lax; no auth tokens appeared in JSON.
-- A project created on the staged deployment retained its revision and edits through fresh requests on the promoted domain. Anonymous access returned 401, a different account received 404, and cross-origin writes returned 403.
-- A synthetic provider key was saved through Settings and encrypted in PostgreSQL. Neither account received the raw value; the second account did not receive its suffix. Removal passed. The key was never sent to a provider.
-- Renderer lifecycle checks prevent SDK command inspection from resuming stopped compute and preserve exports even if compute has already ended.
-- After a second production deployment, the saved test project and both exported video assets remained accessible.
-- The owner created and verified a real account. Three local projects, including the original 14-second film, were imported with media and revision history; rerunning the import skipped all three without duplicates. The two historical verification films were archived, not deleted. The original local data remains intact.
-- Real Vercel Workflow/Sandbox exports completed in landscape (1920 × 1080) and portrait (1080 × 1920), with H.264 video and audio. Both two-second films measured 2.048 seconds including audio padding. They were retrieved from private storage and inspected locally. Captions and the project ZIP also passed.
+## Current branch: real media output
 
-## Remaining release verification
+`scripts/verify-compositor.ts` generated a synthetic recording and rendered it with real Remotion/FFmpeg. No provider API or account data is involved. All three six-second exports passed H.264/AAC, exact duration and dimensions:
 
-Public signup and password recovery require custom SMTP: Supabase's default sender only serves organization members. Custom confirmation/recovery templates are prepared but cannot be enabled on the free plan until SMTP is configured. Default same-browser PKCE callbacks remain supported.
+| Format    | Dimensions  | Measured duration |
+| --------- | ----------- | ----------------- |
+| Landscape | 1920 × 1080 | 6.000 s           |
+| Portrait  | 1080 × 1920 | 6.000 s           |
+| Square    | 1080 × 1080 | 6.000 s           |
 
-Real Runway/OpenAI/Claude/Gemini/ElevenLabs generation is not certified without user-supplied keys and a live test. The authenticated Chrome capture test remains postponed at the user's request. Original local projects are preserved and have been imported into the verified owner account.
+Fixtures exercise source trim, 1.5× playback, animated crop, timecoded callout, aligned speech captions, narration/music/SFX, transitions and an endcard. Frames around transition boundaries and representative portrait/square frames were inspected. Measured synthetic audio was -16.04 LUFS with a peak below the -1.5 dBTP ceiling. This proves the tested composition/output mechanics; it does not judge a real product film's story or visual appeal.
 
-The historical evidence below is from the original local prototype and does not certify the account-based cloud release.
+Generated fixtures/results stay in ignored `.data/compositor-verification/` and are not public repository assets.
 
----
+## Current branch: browser checks
 
-# Verification — 23 September 2026
+Checks use the signed-in localhost editor with isolated application data and a duplicated verification film. The original paid-test film is unchanged.
 
-Cue is implemented as a private local application. This report separates completed checks from external integrations that still need a live account or browser permission.
+- Desktop editor and 390 × 844 layout reviewed; no horizontal document overflow on mobile. The workflow bar/timeline intentionally scroll horizontally within their own regions.
+- Title/caption save and reload retain edits. Undo restores the prior edit. Sidebar collapse/expand and inspector navigation work.
+- The saved ElevenLabs key loads real stock voices through the free listing endpoint; no new narration/video/music generation was submitted.
+- Importing a seven-second synthetic recording through the browser succeeds. The local worker analyzes it and the editor displays ten timecoded evidence thumbnails.
+- Changing playback to 2× preserves the selected source interval; scene duration becomes 2.5 seconds. Scene locking and a timecoded “Visible result” highlight persist and display correctly.
+- A browser-initiated export using existing footage, saved narration and the edited synthetic clip completed: **25.500 seconds, 1920 × 1080**. Its immutable manifest records compositor `2.0.0`. The exported frame at 23.5 seconds was inspected: 2× source playback and the “Visible result” callout appear correctly. No new paid generation was needed.
 
-## Completed
+The updated Chrome extension has **not** been installed/tested in the user's existing profile during this verification. Permission confirmation is pending. No browser-profile workaround or unapproved permission grant was used.
 
-- `npm run check`: TypeScript passes; **34 tests in four files pass**; the Chrome extension packages successfully; the optimized Next.js production build succeeds.
-- `npm run test:e2e` against the production-mode server and real worker: landscape **1920 × 1080** and portrait **1080 × 1920** H.264 MP4 exports, with AAC audio, pass FFprobe resolution/duration checks. Each test film is two seconds; the muxed file duration is 2.048 seconds including audio padding.
-- The same live test verifies scene captions, ZIP download, project manifest/takes, and exclusion of the installation session credential from the manifest.
-- Actual rendered frames were inspected. The export now loads its bundled Manrope font before rendering; the earlier cross-origin font failure was corrected. The fresh production render log has no font/CORS error.
-- In-app browser: create a film; upload screenshots through the file chooser; construct a starter cut; edit names/captions/brief; save; play the timeline; navigate to Settings with unsaved changes and return with edits preserved; queue and receive a real export; verify capture-dialog focus wrapping and Escape dismissal.
-- Responsive browser checks: desktop and 390 × 844 mobile editor/landing views, with no horizontal document overflow. The mobile editor places the inspector below the player and makes the scene list horizontally scrollable.
-- Provider controls report missing keys and disable unavailable operations. No paid provider request was sent during verification.
+## Earlier integration evidence — before this workflow implementation
 
-## Automated coverage
+The previous source/deployment verified Supabase account ownership, private PostgreSQL/RLS, private Blob read/write, encrypted per-account keys, real sign-in, cross-origin rejection and saved work across deployments. Two-second cloud Workflow/Sandbox landscape and portrait exports completed. These are baseline checks, not proof that every new stage runs correctly in the hosted environment.
 
-The suite exercises owner/origin/Host checks, project-scoped pairing, encrypted credential isolation, immutable revisions and stale-edit conflicts, asset ownership, media sniffing and normalization (including MediaRecorder WebM without a duration), ranged downloads, checksummed chunk upload/retry, budget transactions, idempotency conflicts, recording persistence/recovery, structured plan validation, and provider wire contracts.
+Using the owner's saved keys, a separate earlier localhost film (“Cue — live provider check”) completed an OpenAI `gpt-5.4-mini` four-scene proposal, one Runway `gen4_turbo` take and ElevenLabs `eleven_multilingual_v2` narration. Its combined export measured 23.019 seconds at 1920 × 1080. Cue recorded $0.55 in conservative estimated charges, not a reconciled provider invoice. Reload/new-tab persistence retained the proposal, selected take, narration and export.
 
-Worker tests cover saved-task recovery without resubmission, ambiguous submit handling, retrieval retry with the same task ID, cancellation accounting, and recovery of an already-persisted director response. These provider responses are simulated; they do not prove live generation quality.
+That film was rejected for creative quality: it primarily showed marketing screenshots rather than demonstrating a product workflow. Successful API requests did not establish a useful promotional result. It is not presented as creative acceptance for this PR.
 
-## Artifacts
+## Required before public-release approval
 
-- `docs/screenshots/verified-landscape.mp4` and `.png`
-- `docs/screenshots/verified-portrait.mp4` and `.png`
-- `docs/screenshots/editor-desktop.png`
-- `docs/screenshots/editor-mobile.png`
-- `docs/screenshots/landing-mobile.png`
-- `examples/cue-first-screening.mp4` and `.png`: 14-second local composition and poster
-- `examples/cue-home.png` and `examples/cue-guide.png`: real source captures
-
-## Pending release checks
-
-1. **Real Chrome extension:** loading the unpacked extension with debugger/tabCapture access requires the user's confirmation. After loading into an isolated profile, verify authenticated routes, login redirects, screenshot redaction, recording start/stop, cross-origin discard, panel/browser restart recovery, pairing expiry, and upload retry. Unit tests and a packaged extension are not a substitute for this check.
-2. **Live providers:** no Runway, Gemini or ElevenLabs keys are configured in this installation and no paid-test budget is approved. Verify a real structured storyboard, one generated video take, narration, cancel/recovery behavior and billing reconciliation before calling these integrations production-verified.
-3. **Public hosting:** deliberately not enabled. Add hosted authentication, tenant isolation, managed encryption/storage and mandatory per-user keys before exposing the service outside loopback.
-
-## Current creative scope
-
-Local capture imports, deterministic film editing/compositing, uploaded background music with narration ducking, and MP4/poster/caption/project exports work without AI accounts. Runway generation, Gemini direction and ElevenLabs speech are implemented but need the live checks above. Music and sound-effect _generation_ are not implemented yet.
-
-The current capture UI discovers links visible in the selected tab and captures reviewed routes/states. It is not an unattended exhaustive site crawler. Captures are viewport images; feature framing is edited in the film. Recordings are silent, manually reviewed, and do not inherit screenshot masks.
+1. Confirm extension installation/permissions and exercise a real authenticated app with navigation, modal/form state, masks, pause, result markers, cross-origin handling, recovery and resumable upload.
+2. Configure verified-domain SMTP and independent staging resources; verify an unrelated user's signup, confirmation, reset and recovery. Do not enable public enrollment before those checks.
+3. Exercise new hosted Workflow analysis/provider/render stages with the browser and local worker closed; test throttling, cancellation and ambiguous paid recovery with a bounded approved budget. Live Claude/Gemini, music, SFX and pronunciation/aligned-speech generation remain unverified here.
+4. Rehearse infrastructure backups/credential rotation and an archive restore/render in staging. The local restore and rotation contracts are covered; operator backup configuration is external.
+5. Watch a newly captured, AI-directed real product demonstration end to end, including sound and phone-sized output. Do not substitute synthetic fixtures or the old slideshow for this acceptance check.
