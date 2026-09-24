@@ -1,22 +1,15 @@
 import { randomUUID } from "node:crypto";
-import {
-  claimJob,
-  getJob,
-  updateJob,
-  assets,
-  project,
-  editProject,
-  getAsset,
-  addTake,
-  now,
-  db,
-  event,
-} from "../../packages/storage/db";
+import type { Job } from "../../packages/contracts";
 import {
   applyPlan,
-  storyboardPrompt,
   evidenceAssets,
+  storyboardPrompt,
+  rankCaptures,
 } from "../../packages/director";
+import {
+  analysisCurrent,
+  analyzeAsset,
+} from "../../packages/director/analysis";
 import {
   cancelVideo,
   downloadOutput,
@@ -26,9 +19,20 @@ import {
   submitVideo,
   synthesize,
 } from "../../packages/providers";
+import { generateSound, timedSpeech } from "../../packages/providers/audio";
+import {
+  addTake,
+  assets,
+  event,
+  getAsset,
+  getJob,
+  now,
+  project,
+  updateJob,
+} from "../../packages/storage/db";
 import { importMedia } from "../../packages/storage/media";
+import { redactMedia } from "../../packages/storage/redaction";
 import { renderFilm } from "./render";
-import type { Job } from "../../packages/contracts";
 
 export async function runJob(start: Job) {
   let job = start;
@@ -51,7 +55,45 @@ export async function runJob(start: Job) {
       });
       return;
     }
-    if (job.kind === "generate") {
+    if (job.kind === "redact") {
+      job = await updateJob(job, { state: "running", progress: 10 });
+      const source = await getAsset(job.payload.assetId);
+      if (source.projectId !== job.projectId)
+        throw Error("Source belongs to another film.");
+      const result = await redactMedia(source, job.payload);
+      await updateJob(job, {
+        state: (await getJob(job.id)).cancelRequested
+          ? "cancelled"
+          : "completed",
+        progress: 100,
+        outputAssetId: result.id,
+        leaseUntil: 0,
+      });
+    } else if (job.kind === "analyze") {
+      for (const ref of job.payload.evidence || []) {
+        const asset = await getAsset(ref.id);
+        if (asset.projectId !== job.projectId || asset.hash !== ref.hash)
+          throw new Error("Source evidence changed.");
+        if ((await getJob(job.id)).cancelRequested) {
+          await updateJob(job, { state: "cancelled", leaseUntil: 0 });
+          return;
+        }
+        if (asset.kind === "video" && !analysisCurrent(asset)) {
+          await analyzeAsset(asset);
+          await updateJob(job, {
+            state: "running",
+            progress: Math.min(90, job.progress + 10),
+            leaseUntil: 0,
+          });
+          return;
+        }
+      }
+      await updateJob(job, {
+        state: "completed",
+        progress: 100,
+        leaseUntil: 0,
+      });
+    } else if (job.kind === "generate") {
       if (!job.providerTaskId) {
         job = await updateJob(job, { state: "submitting", progress: 5 });
         const taskId = await submitVideo(
@@ -134,15 +176,49 @@ export async function runJob(start: Job) {
         });
         return;
       }
+      job = await updateJob(job, { state: "running", progress: 5 });
+      const captured = [];
+      const manifest =
+        job.payload.evidence ||
+        evidenceAssets(job.payload.draft, await assets(job.projectId)).map(
+          (a) => ({ id: a.id, hash: a.hash }),
+        );
+      for (const ref of manifest) {
+        const source = await getAsset(ref.id);
+        if (source.metadata.privacyPending || source.metadata.supersededBy)
+          throw Error(
+            "The source was excluded for privacy. Use a safe copy in a new proposal.",
+          );
+        if (source.projectId !== job.projectId || source.hash !== ref.hash)
+          throw new Error("Source evidence changed. Create a new proposal.");
+        if ((await getJob(job.id)).cancelRequested) {
+          await updateJob(job, {
+            state: "cancelled",
+            reservedCents: 0,
+            leaseUntil: 0,
+          });
+          return;
+        }
+        if (source.kind === "video" && !analysisCurrent(source)) {
+          await analyzeAsset(source);
+          await updateJob(job, {
+            state: "running",
+            progress: Math.min(18, job.progress + 1),
+            leaseUntil: 0,
+          });
+          return;
+        }
+        captured.push(source);
+      }
       job = await updateJob(job, { state: "submitting", progress: 20 });
-      const captured = evidenceAssets(
-        job.payload.draft,
-        await assets(job.projectId),
-      );
+      const selectedEvidence = rankCaptures(job.payload.draft, captured, 12);
       const result = await planStoryboard(
         owner,
-        storyboardPrompt(job.payload.draft, captured),
-        captured,
+        storyboardPrompt(job.payload.draft, selectedEvidence) +
+          (job.payload.scopeShotId
+            ? `\nOVERRIDE: return four alternative versions of this ONE scene, not four consecutive scenes. Scene: ${JSON.stringify(job.payload.draft.shots.find((s: { id: string }) => s.id === job.payload.scopeShotId))}. Requested change: ${job.payload.instruction || "Improve clarity"}. Each alternative must independently show the same scene with an improved edit. Do not add an opening or endcard unless this scene already has that role.`
+            : ""),
+        selectedEvidence,
         job.payload.provider || "gemini",
         job.payload.model,
       );
@@ -168,13 +244,42 @@ export async function runJob(start: Job) {
         leaseUntil: 0,
       });
       await event(job.projectId, "plan.ready", { jobId: job.id });
+    } else if (job.kind === "music" || job.kind === "sound") {
+      const kind = job.kind;
+      job = await updateJob(job, { state: "submitting", progress: 20 });
+      const buffer = await generateSound(
+        owner,
+        kind,
+        job.payload.prompt,
+        job.payload.seconds,
+      );
+      const asset = await importMedia(
+        job.projectId,
+        buffer,
+        `${job.kind}-${job.id.slice(0, 8)}.mp3`,
+        { state: job.kind, title: job.payload.prompt },
+      );
+      await updateJob(job, {
+        state: "completed",
+        progress: 100,
+        outputAssetId: asset.id,
+        chargedCents: job.reservedCents,
+        reservedCents: 0,
+        leaseUntil: 0,
+      });
     } else if (job.kind === "narrate") {
       job = await updateJob(job, { state: "submitting", progress: 20 });
-      const buffer = await synthesize(
-        owner,
-        job.payload.text,
-        job.payload.voiceId,
-      );
+      const timed = job.payload.timed
+        ? await timedSpeech(
+            owner,
+            job.payload.text,
+            job.payload.voiceId,
+            job.payload.pronunciationDictionaries || [],
+          )
+        : null;
+      const buffer =
+        timed?.buffer ||
+        (await synthesize(owner, job.payload.text, job.payload.voiceId));
       const asset = await importMedia(
         job.projectId,
         buffer,
@@ -186,6 +291,7 @@ export async function runJob(start: Job) {
         error: null,
         progress: 100,
         outputAssetId: asset.id,
+        payload: { ...job.payload, speechCues: timed?.cues || [] },
         chargedCents: job.reservedCents,
         reservedCents: 0,
         leaseUntil: 0,
@@ -224,10 +330,10 @@ export async function runJob(start: Job) {
       });
     else
       await updateJob(fresh, {
-        state: fresh.cancelRequested
-          ? "cancelled"
-          : uncertain
-            ? "unknown"
+        state: uncertain
+          ? "unknown"
+          : fresh.cancelRequested
+            ? "cancelled"
             : "failed",
         error: uncertain
           ? "The provider submission could not be confirmed. Check the provider dashboard before creating another request."

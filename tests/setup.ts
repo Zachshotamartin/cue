@@ -1,7 +1,6 @@
-import { vi } from "vitest";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
 process.env.CUE_ROOT = process.cwd();
 process.env.CUE_DATA_DIR = path.join(process.cwd(), ".test-data", randomUUID());
 process.env.CUE_MASTER_KEY = "12".repeat(32);

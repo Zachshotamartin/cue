@@ -1,21 +1,26 @@
-import fs from "node:fs/promises";
-import path from "node:path";
 import { bundle } from "@remotion/bundler";
 import {
-  renderMedia,
-  selectComposition,
   makeCancelSignal,
+  renderMedia,
   renderStill,
+  selectComposition,
 } from "@remotion/renderer";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { finalizeFilm } from "../../packages/compositor/output";
+import type { Draft, Job } from "../../packages/contracts";
 import {
-  dataDir,
-  root,
-  origin,
   assetSignature,
+  dataDir,
+  origin,
+  root,
 } from "../../packages/storage/config";
 import { assets, takes } from "../../packages/storage/db";
-import { importMedia, inspect, run } from "../../packages/storage/media";
-import type { Job, Draft } from "../../packages/contracts";
+import {
+  attachExportManifest,
+  validateExportInput,
+} from "../../packages/storage/manifest";
+import { importMedia } from "../../packages/storage/media";
 import { createRenderMonitor } from "./render-monitor";
 let serveUrl: string | null = null;
 export async function compositionBundle() {
@@ -29,6 +34,7 @@ export async function compositionBundle() {
   return serveUrl;
 }
 export async function renderFilm(job: Job) {
+  await validateExportInput(job);
   const draft: Draft = job.payload.draft;
   if (!draft.shots.length) throw new Error("Add scenes before exporting.");
   const inputProps = {
@@ -74,47 +80,18 @@ export async function renderFilm(job: Job) {
       onProgress: monitor.onProgress,
     });
     await monitor.stop();
-    let info = await inspect(output);
-    if (info.streams?.some((s: any) => s.codec_type === "audio")) {
-      const limited = `${output}.limited.mp4`;
-      await run(
-        "ffmpeg",
-        [
-          "-v",
-          "error",
-          "-i",
-          output,
-          "-c:v",
-          "copy",
-          "-af",
-          "alimiter=limit=0.95:level=false",
-          "-c:a",
-          "aac",
-          "-movflags",
-          "+faststart",
-          limited,
-        ],
-        { timeout: 180000 },
-      );
-      await fs.rename(limited, output);
-      info = await inspect(output);
-    }
-    const video = info.streams?.find((s: any) => s.codec_type === "video");
-    if (
-      video?.width !== composition.width ||
-      video?.height !== composition.height
-    )
-      throw new Error("The exported resolution failed validation.");
-    const actual = Number(info.format?.duration),
-      expected = draft.shots.reduce((n, s) => n + s.duration, 0);
-    if (!Number.isFinite(actual) || Math.abs(actual - expected) > 0.2)
-      throw new Error("The exported duration failed validation.");
+    await finalizeFilm(output, {
+      width: composition.width,
+      height: composition.height,
+      duration: draft.shots.reduce((n, s) => n + s.duration, 0),
+    });
     const asset = await importMedia(
       job.projectId,
       await fs.readFile(output),
       `${draft.title}-${draft.format}.mp4`,
       { state: "export", title: draft.title },
     );
+    await attachExportManifest(asset.id, job);
     const poster = path.join(dataDir, `poster-${job.id}.png`);
     await renderStill({
       composition,

@@ -1,3 +1,5 @@
+import { interactionsSchema } from "../contracts/evidence";
+import { z } from "zod";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
@@ -103,7 +105,21 @@ function cleanMetadata(raw: CaptureMetadata): CaptureMetadata {
     Number.isFinite(raw.viewport.height)
   )
     out.viewport = raw.viewport;
+  if (raw.interactions)
+    out.interactions = interactionsSchema.parse(raw.interactions);
+  if (typeof raw.journey === "string") out.journey = raw.journey.slice(0, 1000);
   if (typeof raw.masks === "number") out.masks = raw.masks;
+  const rights = z
+    .object({
+      credit: z.string().max(500),
+      license: z.string().max(500),
+      sourceUrl: z
+        .string()
+        .max(2048)
+        .refine((v) => !v || /^https?:\/\//.test(v)),
+    })
+    .safeParse(raw.rights);
+  if (rights.success) out.rights = rights.data;
   return out;
 }
 export async function importMedia(
@@ -252,7 +268,10 @@ export async function importMedia(
           a.hash === digest &&
           a.name === name &&
           JSON.stringify(a.metadata) ===
-            JSON.stringify(cleanMetadata(metadata)),
+            JSON.stringify({
+              ...cleanMetadata(metadata),
+              originalHash: hash(input),
+            }),
       );
     if (existing) return existing;
     if ((await projectStorage(owner)) + buffer.length > 1024 * 1048576)
@@ -280,7 +299,7 @@ export async function importMedia(
       duration,
       hash: digest,
       path: relative,
-      metadata: cleanMetadata(metadata),
+      metadata: { ...cleanMetadata(metadata), originalHash: hash(input) },
       createdAt: now(),
     };
     await addAsset(asset);

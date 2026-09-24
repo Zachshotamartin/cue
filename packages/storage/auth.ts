@@ -89,6 +89,7 @@ export async function exchangePairing(code: string, request: Request) {
       token,
       projectId: r.projectId,
       title: (await project(r.projectId)).draft.title,
+      journey: (await project(r.projectId)).draft.journey,
       expiresIn: 86400,
     };
   });

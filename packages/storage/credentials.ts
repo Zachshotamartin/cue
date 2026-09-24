@@ -40,17 +40,29 @@ export function decryptCredential(
 ) {
   const x = JSON.parse(encrypted);
   if (x.version !== 1) throw new Error("Unsupported credential version.");
-  const d = crypto.createDecipheriv(
-    "aes-256-gcm",
-    master(),
-    Buffer.from(x.nonce, "base64"),
+  const keys = [master()];
+  if (/^[a-f0-9]{64}$/i.test(process.env.CUE_MASTER_KEY_PREVIOUS || ""))
+    keys.push(Buffer.from(process.env.CUE_MASTER_KEY_PREVIOUS!, "hex"));
+  for (const key of keys) {
+    try {
+      const d = crypto.createDecipheriv(
+        "aes-256-gcm",
+        key,
+        Buffer.from(x.nonce, "base64"),
+      );
+      d.setAAD(Buffer.from(`${owner}:${provider}:v1`));
+      d.setAuthTag(Buffer.from(x.tag, "base64"));
+      return Buffer.concat([
+        d.update(Buffer.from(x.data, "base64")),
+        d.final(),
+      ]).toString("utf8");
+    } catch {
+      /* Try only the explicitly configured previous rotation key. */
+    }
+  }
+  throw new Error(
+    "Saved connection could not be decrypted for this account. Check the configured key rotation before replacing it.",
   );
-  d.setAAD(Buffer.from(`${owner}:${provider}:v1`));
-  d.setAuthTag(Buffer.from(x.tag, "base64"));
-  return Buffer.concat([
-    d.update(Buffer.from(x.data, "base64")),
-    d.final(),
-  ]).toString("utf8");
 }
 export async function putCredential(
   owner: string,
@@ -97,8 +109,15 @@ export async function credentialStatus(owner = "local") {
           "SELECT suffix,updatedAt FROM credentials WHERE owner=? AND provider=?",
         )
         .get(owner, provider);
+      const check = await db
+        .prepare(
+          "SELECT status,checked_at FROM credential_checks WHERE owner=? AND provider=?",
+        )
+        .get(owner, provider);
       return {
         provider,
+        verification: check?.status || "unverified",
+        checkedAt: check?.checked_at || null,
         configured:
           !!row ||
           (process.env.CUE_ALLOW_LOCAL_PROVIDER_KEYS === "1" &&

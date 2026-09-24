@@ -56,6 +56,19 @@ export async function POST(
       );
     const action = (await ctx.params).path.join("/");
     if (
+      process.env.CUE_SHARED_AUTH_READ_ONLY === "1" &&
+      !["sign-in", "sign-out"].includes(action)
+    )
+      return json(
+        {
+          error: {
+            message:
+              "This development environment shares sign-in identity only. Manage your account on the production site, or configure a separate local Supabase instance.",
+          },
+        },
+        403,
+      );
+    if (
       ![
         "sign-up",
         "sign-in",
@@ -95,6 +108,16 @@ export async function POST(
     let result;
     switch (action) {
       case "sign-up": {
+        if (process.env.CUE_PUBLIC_SIGNUP === "0")
+          return json(
+            {
+              error: {
+                message:
+                  "Cue is currently invite-only. Sign in with your existing account or contact the owner for access.",
+              },
+            },
+            403,
+          );
         const b = z
           .object({ email, password, name: z.string().trim().min(1).max(100) })
           .parse(body);

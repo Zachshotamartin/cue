@@ -24,7 +24,9 @@ function schemaState(exists: boolean, applied: boolean) {
     if (sql.includes("to_regclass"))
       return { rows: [{ name: exists ? "cue.schema_migrations" : null }] };
     if (sql.startsWith("SELECT version"))
-      return { rows: applied ? [{ version: 1 }] : [] };
+      return {
+        rows: applied ? [{ version: 1 }, { version: 2 }, { version: 3 }] : [],
+      };
     return { rows: [] };
   });
 }
@@ -66,6 +68,26 @@ describe("database cold starts", () => {
       expect(statements.at(-1)).toBe("COMMIT");
     },
   );
+
+  it("upgrades v1 without relocking existing project and credential tables", async () => {
+    schemaState(true, true);
+    const query = pg.query.getMockImplementation()!;
+    pg.query.mockImplementation(async (sql: string) =>
+      sql.startsWith("SELECT version")
+        ? { rows: [{ version: 1 }] }
+        : query(sql),
+    );
+    const { initializeDatabase } = await import("../packages/storage/client");
+    await initializeDatabase();
+    const statements = pg.query.mock.calls.map(([sql]) => String(sql));
+    expect(
+      statements.some((s) => s.includes('ALTER TABLE cue."garbage"')),
+    ).toBe(true);
+    expect(
+      statements.some((s) => s.includes('ALTER TABLE cue."credentials"')),
+    ).toBe(false);
+    expect(statements.at(-1)).toBe("COMMIT");
+  });
 
   it("rolls back a failed migration and allows another startup attempt", async () => {
     schemaState(false, false);

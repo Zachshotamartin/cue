@@ -1,4 +1,6 @@
 "use client";
+import { useState } from "react";
+import { MediaCleanupDialog } from "./MediaCleanupDialog";
 import { DownloadSimple } from "@phosphor-icons/react";
 import { dimensions } from "../../../../packages/contracts";
 import { api, assetUrl, jobOptions, money } from "../client-api";
@@ -6,9 +8,11 @@ import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
 import { useEditor } from "./EditorContext";
 import { Disclosure } from "../ui/Disclosure";
+import { QualityPanel } from "./QualityPanel";
 import { ExportCard } from "./ExportCard";
 
 export function ExportInspector() {
+  const [cleaning, setCleaning] = useState(false);
   const {
     id,
     snap,
@@ -27,6 +31,7 @@ export function ExportInspector() {
       {tab === "export" && (
         <>
           <h2>Ready for its audience.</h2>
+          <QualityPanel />
           <div className="export-spec">
             <span>
               {dimensions(draft.format).width} ×{" "}
@@ -73,7 +78,7 @@ export function ExportInspector() {
                 </a>
               ))}
             <a href={`/api/projects/${id}/captions`} download>
-              Scene captions (.srt) <DownloadSimple size={15} />
+              Speech captions (.srt) <DownloadSimple size={15} />
             </a>
             <a href={`/api/projects/${id}/archive`} download>
               Project archive (.zip) <DownloadSimple size={15} />
@@ -129,6 +134,12 @@ export function ExportInspector() {
               </Button>
             ))}
           </Disclosure>
+          <Button className="text-link" onClick={() => setCleaning(true)}>
+            Clean old media & history
+          </Button>
+          {cleaning && (
+            <MediaCleanupDialog onClose={() => setCleaning(false)} />
+          )}
           <h3 className="subsection-title">Job history</h3>
           {snap.jobs.slice(0, 12).map((j) => (
             <article

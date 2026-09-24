@@ -1,4 +1,5 @@
-import { randomUUID } from "node:crypto";
+import { inspectFilm } from "../director/quality";
+import { createHash, randomUUID } from "node:crypto";
 import {
   defaultDraft,
   draftSchema,
@@ -84,6 +85,24 @@ export async function addAsset(asset: Asset) {
     .run(asset.id, asset.projectId, JSON.stringify(asset));
   await event(asset.projectId, "asset.added", { id: asset.id });
 }
+/** Merge metadata under a row lock so analysis/rights cannot clear a privacy exclusion. */
+export async function updateAssetMetadata(
+  id: string,
+  patch: Asset["metadata"],
+): Promise<Asset> {
+  return tx(async () => {
+    const row = await db
+      .prepare("SELECT data FROM assets WHERE id=?" + rowLock())
+      .get(id);
+    if (!row) throw Error("Asset not found.");
+    const current: Asset = JSON.parse(row.data);
+    const updated = { ...current, metadata: { ...current.metadata, ...patch } };
+    await db
+      .prepare("UPDATE assets SET data=? WHERE id=?")
+      .run(JSON.stringify(updated), id);
+    return updated;
+  });
+}
 export async function jobs(id: string): Promise<Job[]> {
   return (
     (await db
@@ -147,13 +166,9 @@ export async function enqueue(
       const prior = JSON.parse(previous.data) as Job;
       if (
         prior.kind !== kind ||
-        JSON.stringify(
-          Object.fromEntries(
-            Object.entries(prior.payload).filter(
-              ([k]) => !["result", "retries"].includes(k),
-            ),
-          ),
-        ) !== JSON.stringify(payload)
+        (prior.inputHash ||
+          jobInputHash(prior.kind, legacyJobInput(prior.payload))) !==
+          jobInputHash(kind, payload)
       )
         throw new Error(
           "Idempotency conflict: this request key already belongs to another job.",
@@ -180,6 +195,40 @@ export async function enqueue(
     const b = await budget(id);
     if (b.spent + b.reserved + reservedCents > b.limit)
       throw new Error("This job exceeds the project spending limit.");
+    if (reservedCents > 0) {
+      // Serializes reservations across projects/accounts without holding a lock during provider calls.
+      await lockAccount("cue-daily-reservations");
+      const rows = await db
+        .prepare(
+          "SELECT j.data,p.owner FROM jobs j JOIN projects p ON p.id=j.projectId",
+        )
+        .all();
+      const since = Date.now() - 86400000;
+      let account = 0,
+        global = 0;
+      for (const row of rows) {
+        const j = JSON.parse(row.data) as Job;
+        const amount =
+          j.reservedCents +
+          (Date.parse(j.createdAt) >= since ? j.chargedCents : 0);
+        global += amount;
+        if (row.owner === ownerProject.owner) account += amount;
+      }
+      const cap = (name: string, fallback: number) => {
+        const n = Number(process.env[name]);
+        return process.env[name] !== undefined && Number.isFinite(n)
+          ? Math.max(0, n)
+          : fallback;
+      };
+      if (account + reservedCents > cap("CUE_ACCOUNT_DAILY_CENTS", 5000))
+        throw Error(
+          "Your account has reached its daily estimated AI spending allowance. Existing reservations are included; check unfinished jobs or try tomorrow.",
+        );
+      if (global + reservedCents > cap("CUE_GLOBAL_DAILY_CENTS", 20000))
+        throw Error(
+          "Cue has reached its daily generation allowance. Your edits are saved; try again tomorrow.",
+        );
+    }
     const job: Job = {
       id: randomUUID(),
       projectId: id,
@@ -187,6 +236,7 @@ export async function enqueue(
       state: "queued",
       progress: 0,
       payload,
+      inputHash: jobInputHash(kind, payload),
       providerTaskId: null,
       error: null,
       outputAssetId: null,
@@ -204,25 +254,102 @@ export async function enqueue(
     return job;
   });
 }
+/** Stable across property ordering and changes to mutable stage output. */
+export function jobInputHash(kind: string, payload: unknown): string {
+  const canonical = (v: any): any =>
+    Array.isArray(v)
+      ? v.map(canonical)
+      : v && typeof v === "object"
+        ? Object.fromEntries(
+            Object.keys(v)
+              .sort()
+              .map((k) => [k, canonical(v[k])]),
+          )
+        : v;
+  return createHash("sha256")
+    .update(JSON.stringify({ kind, payload: canonical(payload) }))
+    .digest("hex");
+}
+function legacyJobInput(payload: Job["payload"]) {
+  return Object.fromEntries(
+    Object.entries(payload).filter(
+      ([k]) => !["result", "retries", "speechCues"].includes(k),
+    ),
+  );
+}
 export async function claimJob(): Promise<Job | null> {
-  return await tx(async () => {
-    const row: any = await db
+  return claimNextJob();
+}
+async function claimNextJob(
+  specific?: string,
+  leaseMs = 60000,
+): Promise<Job | null> {
+  return tx(async () => {
+    // Short global scheduling transaction. Provider calls never hold this lock.
+    await lockAccount("cue-global-scheduler");
+    const rows = await db
       .prepare(
-        "SELECT data FROM jobs WHERE state IN ('queued','running','retrieving','submitting') AND leaseUntil<? ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED",
+        "SELECT j.data,p.owner FROM jobs j JOIN projects p ON p.id=j.projectId WHERE j.state IN ('queued','running','retrieving','submitting')",
       )
-      .get(Date.now());
-    if (!row) return null;
-    const j: Job = JSON.parse(row.data);
+      .all();
+    const work = rows.map((row) => ({
+      job: JSON.parse(row.data) as Job,
+      owner: row.owner as string,
+    }));
+    const active = work.filter(({ job }) => job.leaseUntil > Date.now());
+    const limit = Math.max(
+      1,
+      Math.min(32, Number(process.env.CUE_MAX_CONCURRENT_JOBS) || 6),
+    );
+    if (active.length >= limit) return null;
+    const candidates = work
+      .filter(
+        ({ job, owner }) =>
+          job.leaseUntil <= Date.now() &&
+          active.filter((a) => a.owner === owner).length < 2 &&
+          (job.kind !== "render" ||
+            active.filter((a) => a.job.kind === "render").length < 2),
+      )
+      .sort(
+        (a, b) =>
+          active.filter((x) => x.owner === a.owner).length -
+            active.filter((x) => x.owner === b.owner).length ||
+          a.job.createdAt.localeCompare(b.job.createdAt) ||
+          a.job.id.localeCompare(b.job.id),
+      );
+    const admitted: typeof candidates = [];
+    for (const candidate of candidates) {
+      if (admitted.length >= limit - active.length) break;
+      if (
+        active.filter((a) => a.owner === candidate.owner).length +
+          admitted.filter((a) => a.owner === candidate.owner).length >=
+        2
+      )
+        continue;
+      if (
+        candidate.job.kind === "render" &&
+        active.filter((a) => a.job.kind === "render").length +
+          admitted.filter((a) => a.job.kind === "render").length >=
+          2
+      )
+        continue;
+      admitted.push(candidate);
+    }
+    const candidate = specific
+      ? admitted.find((c) => c.job.id === specific)
+      : admitted[0];
+    if (!candidate) return null;
+    const j = await getJob(candidate.job.id);
     if (j.state === "submitting" && !j.providerTaskId) {
       await updateJob(j, {
         state: "unknown",
-        error:
-          "Submission was interrupted before a provider task ID was saved. Check provider billing before retrying.",
         leaseUntil: 0,
+        error:
+          "Submission was interrupted before confirmation. Check provider history before retrying.",
       });
       return null;
     }
-    return await updateJob(j, { leaseUntil: Date.now() + 60000 });
+    return updateJob(j, { leaseUntil: Date.now() + leaseMs });
   });
 }
 export async function takes(id: string): Promise<Take[]> {
@@ -252,10 +379,12 @@ export async function validateReferences(id: string, draft: Draft) {
   for (const a of [
     draft.brand.logoAssetId,
     draft.musicAssetId,
+    ...draft.soundCues.map((c) => c.assetId),
     ...draft.shots.flatMap((s) => [
       s.assetId,
       s.secondaryAssetId,
       s.narrationAssetId,
+      ...s.evidenceIds,
     ]),
   ])
     if (a && !owned.has(a))
@@ -267,6 +396,14 @@ export async function validateReferences(id: string, draft: Draft) {
     throw new Error("The brand mark must be an image.");
   if (draft.musicAssetId && owned.get(draft.musicAssetId)?.kind !== "audio")
     throw new Error("Choose an audio file for the soundtrack.");
+  for (const c of draft.soundCues) {
+    const a = owned.get(c.assetId);
+    if (
+      a?.kind !== "audio" ||
+      c.trimStart + c.duration > (a.duration || 0) + 1 / 30
+    )
+      throw new Error("Sound cue must fit its audio source.");
+  }
   for (const s of draft.shots) {
     if (s.assetId && owned.get(s.assetId)?.kind === "audio")
       throw new Error("A scene needs an image or video.");
@@ -334,10 +471,22 @@ export async function snapshot(id: string): Promise<Snapshot> {
 
 export async function validateRender(id: string, draft: Draft) {
   await validateReferences(id, draft);
+  const blocking = inspectFilm(draft, await assets(id), await takes(id)).find(
+    (i) => i.blocking,
+  );
+  if (blocking) throw new Error(blocking.message);
   if (!draft.shots.length) throw new Error("Add scenes before exporting.");
   const owned = new Map((await assets(id)).map((a) => [a.id, a]));
   const knownTakes = new Map((await takes(id)).map((t) => [t.id, t]));
   for (const s of draft.shots) {
+    for (const id of [s.assetId, s.secondaryAssetId]) {
+      const metadata = id ? owned.get(id)?.metadata : undefined;
+      if (metadata?.privacyPending || metadata?.supersededBy)
+        throw new Error(
+          `Replace the original source in “${s.title}” with its reviewed safe copy before exporting.`,
+        );
+    }
+
     if (!s.assetId && s.template !== "endcard")
       throw new Error(`Choose a source for “${s.title}”.`);
     if (s.template === "comparison" && !s.secondaryAssetId)
@@ -363,9 +512,10 @@ export async function validateRender(id: string, draft: Draft) {
     for (const sourceId of sourceIds) {
       const a = sourceId && owned.get(sourceId);
       if (
+        s.template !== "endcard" &&
         a &&
         a.kind === "video" &&
-        s.trimStart + s.duration > (a.duration || 0) + 1 / 30
+        s.trimStart + s.duration * s.playbackRate > (a.duration || 0) + 1 / 30
       )
         throw new Error(
           `“${s.title}” extends beyond its video. Reduce its duration or trim start.`,
@@ -375,24 +525,7 @@ export async function validateRender(id: string, draft: Draft) {
 }
 
 export async function claimSpecificJob(id: string) {
-  return tx(async () => {
-    const job = await getJob(id);
-    if (
-      ["completed", "failed", "cancelled", "unknown"].includes(job.state) ||
-      job.leaseUntil > Date.now()
-    )
-      return null;
-    if (job.state === "submitting" && !job.providerTaskId) {
-      await updateJob(job, {
-        state: "unknown",
-        leaseUntil: 0,
-        error:
-          "Submission was interrupted before confirmation. Check provider history before retrying.",
-      });
-      return null;
-    }
-    return updateJob(job, { leaseUntil: Date.now() + 300000 });
-  });
+  return claimNextJob(id, 300000);
 }
 
 export async function projectStorage(owner: string) {
@@ -401,7 +534,12 @@ export async function projectStorage(owner: string) {
       "SELECT a.data FROM assets a JOIN projects p ON p.id=a.projectId WHERE p.owner=?",
     )
     .all(owner);
-  return rows.reduce((n, r) => n + Number(JSON.parse(r.data).bytes || 0), 0);
+  const objects = new Map<string, number>();
+  for (const row of rows) {
+    const a = JSON.parse(row.data);
+    objects.set(a.path, Number(a.bytes || 0));
+  }
+  return [...objects.values()].reduce((a, b) => a + b, 0);
 }
 export async function accountJobs(owner: string) {
   return (

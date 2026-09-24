@@ -1,41 +1,27 @@
-import fs from "node:fs/promises";
+import { ZipArchive } from "archiver";
+import { randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
+import fs from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
-import { randomUUID } from "node:crypto";
-import { ZipArchive } from "archiver";
 import { z } from "zod";
-import {
-  assets,
-  budget,
-  createProject,
-  db,
-  editProject,
-  enqueue,
-  event,
-  getAsset,
-  getJob,
-  jobs,
-  project,
-  projects,
-  projectStorage,
-  snapshot,
-  takes,
-  tx,
-  updateJob,
-  validateReferences,
-  validateRender,
-} from "../storage/db";
+import { dispatchJob } from "../cloud/dispatch";
+import { speechSrt } from "../compositor/captions";
 import {
   createProjectSchema,
-  draftSchema,
   editSchema,
-  providerSchema,
   plannerProviderSchema,
   planners,
   type Asset,
 } from "../contracts";
-import { validAssetSignature, dataDir, origin, root } from "../storage/config";
+import {
+  evidenceAssets,
+  inferredPalette,
+  starterStoryboard,
+} from "../director";
+import { inspectFilm } from "../director/quality";
+import { mergeStory, replaceScene } from "../director/revisions";
+import { plannerModel, videoPrice } from "../providers";
 import {
   assertCapture,
   assertHost,
@@ -46,6 +32,28 @@ import {
   isExtension,
   requestOrigin,
 } from "../storage/auth";
+import { lockAccount, rateLimit } from "../storage/client";
+import { origin, validAssetSignature } from "../storage/config";
+import { credential } from "../storage/credentials";
+import {
+  assets,
+  createProject,
+  db,
+  editProject,
+  enqueue,
+  getAsset,
+  getJob,
+  jobInputHash,
+  project,
+  projects,
+  projectStorage,
+  takes,
+  tx,
+  updateJob,
+  updateAssetMetadata,
+  validateRender,
+} from "../storage/db";
+import { exportManifest } from "../storage/manifest";
 import {
   assetPath,
   hash,
@@ -54,61 +62,16 @@ import {
   readBounded,
 } from "../storage/media";
 import {
-  credential,
-  credentialStatus,
-  putCredential,
-  removeCredential,
-} from "../storage/credentials";
-import {
-  starterStoryboard,
-  inferredPalette,
-  evidenceAssets,
-} from "../director";
-import { rateLimit, cloudDatabase, lockAccount } from "../storage/client";
-import {
-  writeObject,
-  readObject,
-  deleteObject,
-  streamObject,
   cloudObjects,
+  readObject,
+  streamObject,
+  writeObject,
 } from "../storage/objects";
-import { dispatchJob } from "../cloud/dispatch";
-import { videoPrice, plannerModel } from "../providers";
+import { redactionSchema } from "../storage/redaction";
+import { body, cleanName, idempotency, json } from "./http";
+import { lifecycleRoutes } from "./lifecycle-routes";
+import { settingsRoutes } from "./settings-routes";
 
-const json = (x: unknown, status = 200) =>
-  Response.json(x, { status, headers: { "Cache-Control": "no-store" } });
-async function body(req: Request) {
-  const bytes = await readBounded(req.body, 2 * 1024 * 1024);
-  try {
-    return JSON.parse(bytes.toString("utf8"));
-  } catch {
-    throw new HttpError(400, "Request must contain valid JSON.");
-  }
-}
-function idempotency(req: Request) {
-  const k = req.headers.get("idempotency-key");
-  if (!k || k.length < 8 || k.length > 120)
-    throw new HttpError(400, "An idempotency key is required for this job.");
-  return k;
-}
-function cleanName(name: string) {
-  return name.replace(/[^a-zA-Z0-9._ -]/g, "_").slice(0, 100) || "download";
-}
-function srt(draft: ReturnType<typeof draftSchema.parse>) {
-  let at = 0;
-  const time = (s: number) =>
-    new Date(Math.round(s * 1000))
-      .toISOString()
-      .slice(11, 23)
-      .replace(".", ",");
-  return draft.shots
-    .map((s, i) => {
-      const start = at;
-      at += s.duration;
-      return `${i + 1}\n${time(start)} --> ${time(at)}\n${s.caption.replace(/[\r\n]+/g, " ")}\n`;
-    })
-    .join("\n");
-}
 async function serveAsset(req: Request, asset: Asset) {
   if (cloudObjects()) {
     const { stream, headers: remote } = await streamObject(
@@ -182,7 +145,8 @@ async function serveAsset(req: Request, asset: Asset) {
   );
 }
 export async function handle(req: Request, parts: string[]): Promise<Response> {
-  const o = requestOrigin(req);
+  const o = requestOrigin(req),
+    requestId = randomUUID();
   try {
     assertHost(req);
     if (req.method === "OPTIONS") {
@@ -200,12 +164,24 @@ export async function handle(req: Request, parts: string[]): Promise<Response> {
       });
     }
     const response = await dispatch(req, parts);
+    response.headers.set("X-Cue-Request-Id", requestId);
     if (isExtension(o)) {
       response.headers.set("Access-Control-Allow-Origin", o);
       response.headers.set("Vary", "Origin");
     }
     return response;
   } catch (e: any) {
+    console.warn("cue.request.failed", {
+      requestId,
+      method: req.method,
+      domain: parts[0],
+      category:
+        e instanceof z.ZodError
+          ? "validation"
+          : e instanceof HttpError
+            ? `http-${e.status}`
+            : "internal",
+    });
     if (e.code && typeof e.code === "string")
       return json(
         {
@@ -231,7 +207,8 @@ export async function handle(req: Request, parts: string[]): Promise<Response> {
             .slice(0, 4)
             .join("; ")
         : String(e.message || "The request failed.").slice(0, 600);
-    const r = json({ error: message }, status);
+    const r = json({ error: message, requestId }, status);
+    r.headers.set("X-Cue-Request-Id", requestId);
     if (isExtension(o)) r.headers.set("Access-Control-Allow-Origin", o);
     return r;
   }
@@ -249,6 +226,25 @@ async function dispatch(req: Request, p: string[]): Promise<Response> {
     const asset = await getAsset(p[1]);
     if (!signature || !validAssetSignature(p[1], signature))
       await project(asset.projectId, await assertOwner(req));
+    if (p[2] === "frame") {
+      await project(asset.projectId, await assertOwner(req));
+      const frames = (
+          asset.metadata.analysis as { frames?: { path: string }[] } | undefined
+        )?.frames,
+        index = Number(p[3]);
+      if (!Number.isInteger(index) || index < 0 || !frames?.[index])
+        throw new HttpError(404, "Analyzed frame not found.");
+      return new Response(
+        new Uint8Array(await readObject(frames[index].path)),
+        {
+          headers: {
+            "Content-Type": "image/jpeg",
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+          },
+        },
+      );
+    }
     return serveAsset(req, asset);
   }
   if (p[0] === "uploads" && p[1]) {
@@ -258,7 +254,16 @@ async function dispatch(req: Request, p: string[]): Promise<Response> {
     if (!row) throw new HttpError(404, "Upload not found.");
     await assertCapture(req, row.projectId);
     const state = JSON.parse(row.data);
-    if (method === "GET") return json({ ...state, id: row.id });
+    if (method === "GET")
+      return json({
+        ...state,
+        id: row.id,
+        received: (
+          await db
+            .prepare("SELECT chunk_index FROM upload_chunks WHERE upload_id=?")
+            .all(row.id)
+        ).map((r) => Number(r.chunk_index)),
+      });
     if (state.assetId) return json({ asset: await getAsset(state.assetId) });
     if (Date.now() - Number(row.createdAt) > 86400000)
       throw new HttpError(410, "Upload expired. Start a new upload.");
@@ -341,9 +346,40 @@ async function dispatch(req: Request, p: string[]): Promise<Response> {
         await lockAccount(captureOwner);
         const pending = await db
           .prepare(
-            "SELECT u.data FROM uploads u JOIN projects p ON p.id=u.projectId WHERE p.owner=? AND u.createdAt>?",
+            "SELECT u.id,u.projectId,u.data FROM uploads u JOIN projects p ON p.id=u.projectId WHERE p.owner=? AND u.createdAt>?",
           )
           .all(captureOwner, Date.now() - 86400000);
+        const matching = pending.find((r) => {
+          const state = JSON.parse(r.data);
+          return (
+            r.projectId === p[1] &&
+            state.name === b.name &&
+            state.hash === b.hash &&
+            state.bytes === b.bytes &&
+            jobInputHash("metadata", state.metadata) ===
+              jobInputHash("metadata", b.metadata)
+          );
+        });
+        if (matching) {
+          const state = JSON.parse(matching.data);
+          const valid =
+            !state.assetId ||
+            (await db
+              .prepare("SELECT id FROM assets WHERE id=? AND projectId=?")
+              .get(state.assetId, p[1]));
+          if (valid)
+            return json({
+              ...state,
+              id: matching.id,
+              received: (
+                await db
+                  .prepare(
+                    "SELECT chunk_index FROM upload_chunks WHERE upload_id=?",
+                  )
+                  .all(matching.id)
+              ).map((r) => Number(r.chunk_index)),
+            });
+        }
         const unfinished = pending
           .map((r) => JSON.parse(r.data))
           .filter((x) => !x.assetId);
@@ -384,28 +420,8 @@ async function dispatch(req: Request, p: string[]): Promise<Response> {
     !(await rateLimit(`writes:${owner}`, 120, 60000))
   )
     throw new HttpError(429, "Too many requests. Try again shortly.");
-  if (p[0] === "health") return json({ ok: true, mode: "account", origin });
-  if (p[0] === "settings") {
-    if (method === "GET")
-      return json({
-        providers: await credentialStatus(owner),
-        mode: "account",
-        voiceId: process.env.ELEVENLABS_VOICE_ID || "",
-        origin,
-      });
-    await assertOwner(req, true);
-    const b = z
-      .object({
-        provider: providerSchema,
-        key: z.string().min(12).max(1024).optional(),
-      })
-      .parse(await body(req));
-    if (method === "DELETE") await removeCredential(owner, b.provider);
-    else if (method === "PUT" && b.key)
-      await putCredential(owner, b.provider, b.key);
-    else throw new HttpError(400, "Enter a provider key.");
-    return json({ providers: await credentialStatus(owner) });
-  }
+  const settingsResponse = await settingsRoutes(req, p, owner);
+  if (settingsResponse) return settingsResponse;
   if (p[0] === "projects" && !p[1]) {
     if (method === "GET")
       return json({
@@ -488,7 +504,8 @@ async function dispatch(req: Request, p: string[]): Promise<Response> {
     throw new HttpError(404, "Endpoint not found.");
   const id = p[1],
     current = await project(id, owner);
-  if (!p[2] && method === "GET") return json(await snapshot(id));
+  const lifecycleResponse = await lifecycleRoutes(req, p, owner, current);
+  if (lifecycleResponse) return lifecycleResponse;
   if (p[2] === "pairing" && method === "POST")
     return json(await createPairing(id, owner));
   if (p[2] === "revoke-pairing" && method === "POST") {
@@ -533,18 +550,79 @@ async function dispatch(req: Request, p: string[]): Promise<Response> {
     });
   }
   if (
-    ["plan", "generate", "narrate", "render"].includes(p[2]) &&
+    [
+      "plan",
+      "generate",
+      "narrate",
+      "render",
+      "analyze",
+      "music",
+      "sound",
+    ].includes(p[2]) &&
     method === "POST"
   )
     await assertOwner(req, true);
+  if (p[2] === "redact" && method === "POST") {
+    const b = redactionSchema.parse(await body(req));
+    const source = await getAsset(b.assetId);
+    if (source.projectId !== id || source.kind === "audio")
+      throw new HttpError(400, "Choose a visual source in this film.");
+    const job = await tx(async () => {
+      await lockAccount(owner);
+      const queued = await enqueue(id, "redact", b, idempotency(req));
+      await updateAssetMetadata(source.id, { privacyPending: true });
+      return queued;
+    });
+    await dispatchJob(job.id);
+    return json({ job }, 202);
+  }
+  if (p[2] === "analyze" && method === "POST") {
+    return json(
+      {
+        job: await queue(
+          id,
+          "analyze",
+          {
+            evidence: evidenceAssets(current.draft, await assets(id)).map(
+              (a) => ({ id: a.id, hash: a.hash }),
+            ),
+          },
+          idempotency(req),
+        ),
+      },
+      202,
+    );
+  }
+  if (p[2] === "quality" && method === "GET")
+    return json({
+      issues: inspectFilm(current.draft, await assets(id), await takes(id)),
+    });
   if (p[2] === "plan" && method === "POST") {
     const b = z
       .object({
         revision: z.number().int(),
         provider: plannerProviderSchema.optional(),
+        scopeShotId: z.string().max(100).optional(),
+        instruction: z.string().max(600).optional(),
       })
       .parse(await body(req));
+    if (
+      b.scopeShotId &&
+      !current.draft.shots.some((s) => s.id === b.scopeShotId && !s.locked)
+    )
+      throw new HttpError(400, "Choose an unlocked scene to revise.");
     const provider = b.provider || current.draft.plannerProvider;
+    const captured = evidenceAssets(current.draft, await assets(id));
+    // Planning creates the first timeline: require available evidence, not
+    // an already assembled scene that the director has yet to produce.
+    if (
+      current.draft.objective === "demonstration" &&
+      !captured.some((a) => a.kind === "video")
+    )
+      throw new HttpError(
+        400,
+        "Add a real product workflow recording with its result, or choose a teaser in Brief.",
+      );
     await credential(owner, provider);
     if (b.revision !== current.revision)
       throw new HttpError(409, "Revision conflict.");
@@ -560,6 +638,10 @@ async function dispatch(req: Request, p: string[]): Promise<Response> {
             revision: b.revision,
             provider,
             model: plannerModel(provider),
+            evidence: captured.map((a) => ({ id: a.id, hash: a.hash })),
+            schemaVersion: 2,
+            scopeShotId: b.scopeShotId,
+            instruction: b.instruction,
           },
           idempotency(req),
           planners[provider].reserveCents,
@@ -570,7 +652,11 @@ async function dispatch(req: Request, p: string[]): Promise<Response> {
   }
   if (p[2] === "apply-plan" && method === "POST") {
     const b = z
-      .object({ revision: z.number().int(), jobId: z.string() })
+      .object({
+        revision: z.number().int(),
+        jobId: z.string(),
+        sceneId: z.string().optional(),
+      })
       .parse(await body(req));
     const j = await getJob(b.jobId);
     if (
@@ -584,7 +670,15 @@ async function dispatch(req: Request, p: string[]): Promise<Response> {
       project: await editProject(
         id,
         b.revision,
-        j.payload.result,
+        j.payload.scopeShotId
+          ? replaceScene(
+              current.draft,
+              j.payload.draft,
+              j.payload.result,
+              j.payload.scopeShotId,
+              b.sceneId || "",
+            )
+          : mergeStory(current.draft, j.payload.result),
         "Apply AI storyboard",
       ),
     });
@@ -634,6 +728,42 @@ async function dispatch(req: Request, p: string[]): Promise<Response> {
       202,
     );
   }
+  if (["music", "sound"].includes(p[2]) && method === "POST") {
+    await credential(owner, "elevenlabs");
+    const b = z
+      .object({
+        revision: z.number().int(),
+        prompt: z.string().trim().min(3).max(1000),
+        seconds: z
+          .number()
+          .min(p[2] === "music" ? 3 : 0.5)
+          .max(p[2] === "music" ? 90 : 30),
+        maxCostCents: z.number().int(),
+      })
+      .parse(await body(req));
+    if (b.revision !== current.revision)
+      throw new HttpError(409, "Save before generating audio.");
+    const reserve = p[2] === "music" ? 200 : 50;
+    if (b.maxCostCents < reserve)
+      throw new HttpError(400, "Approve the audio budget reservation first.");
+    return json(
+      {
+        job: await queue(
+          id,
+          p[2] as "music" | "sound",
+          {
+            prompt: b.prompt,
+            seconds: b.seconds,
+            revision: current.revision,
+            model: p[2] === "music" ? "music_v1" : "eleven_text_to_sound_v2",
+          },
+          idempotency(req),
+          reserve,
+        ),
+      },
+      202,
+    );
+  }
   if (p[2] === "narrate" && method === "POST") {
     await credential(owner, "elevenlabs");
     const b = z
@@ -657,6 +787,9 @@ async function dispatch(req: Request, p: string[]): Promise<Response> {
             shotTitle: s.title,
             text: s.narration,
             voiceId: b.voiceId,
+            timed: true,
+            pronunciationDictionaries: current.draft.pronunciationDictionaries,
+            model: "eleven_multilingual_v2",
           },
           idempotency(req),
           Math.max(5, Math.ceil(s.narration.length * 0.04)),
@@ -675,7 +808,11 @@ async function dispatch(req: Request, p: string[]): Promise<Response> {
         job: await queue(
           id,
           "render",
-          { draft: current.draft, revision: current.revision },
+          {
+            draft: current.draft,
+            revision: current.revision,
+            manifest: await exportManifest(id, current.draft, current.revision),
+          },
           idempotency(req),
         ),
       },
@@ -683,7 +820,7 @@ async function dispatch(req: Request, p: string[]): Promise<Response> {
     );
   }
   if (p[2] === "captions" && method === "GET")
-    return new Response(srt(current.draft), {
+    return new Response(speechSrt(current.draft), {
       headers: {
         "Content-Type": "text/plain; charset=utf-8",
         "Content-Disposition": `attachment; filename="${cleanName(current.draft.title)}.srt"`,
@@ -691,12 +828,13 @@ async function dispatch(req: Request, p: string[]): Promise<Response> {
     });
   if (p[2] === "archive" && method === "GET") {
     const archive = new ZipArchive({ zlib: { level: 1 } });
+    const archivedAssets = await assets(id);
     archive.append(
       JSON.stringify(
         {
           version: 1,
           project: current,
-          assets: await assets(id),
+          assets: archivedAssets,
           takes: await takes(id),
         },
         null,
@@ -704,7 +842,9 @@ async function dispatch(req: Request, p: string[]): Promise<Response> {
       ),
       { name: "project.json" },
     );
-    for (const a of await assets(id)) {
+    for (const a of [
+      ...new Map(archivedAssets.map((a) => [a.path, a])).values(),
+    ]) {
       // Open one source lazily when archiver consumes it; never buffer the whole project.
       const source = Readable.from(
         (async function* () {

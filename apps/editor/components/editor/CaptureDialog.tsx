@@ -11,6 +11,7 @@ import Link from "next/link";
 import { api } from "../client-api";
 import { Button } from "../ui/Button";
 import { useEditor } from "./EditorContext";
+import { CapturePlan } from "./CapturePlan";
 import { Modal } from "../ui/Modal";
 
 export function CaptureDialog() {
@@ -33,6 +34,7 @@ export function CaptureDialog() {
       >
         <p className="eyebrow">Real screens, ready to direct</p>
         <h2 id="capture-title">Bring your product in.</h2>
+        <CapturePlan />
         <div className="capture-options">
           <article>
             <LinkSimple size={27} />

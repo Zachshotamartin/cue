@@ -1,7 +1,10 @@
+import { JourneyChecklist } from "./JourneyChecklist.js";
 import { RouteOption } from "./RouteOption.js";
 import { CapturePreview } from "./CapturePreview.js";
 import { getBlob } from "./shared.js";
 const $ = (id) => document.getElementById(id);
+let routeVersion = "",
+  captureVersion = "";
 let state = {},
   urls = [];
 async function command(type, data = {}) {
@@ -22,6 +25,21 @@ async function action(button, fn) {
 }
 async function refresh() {
   state = await command("STATE");
+  const options = state.recordOptions || {};
+  for (const [id, key] of [
+    ["journey", "journey"],
+    ["label", "label"],
+    ["record-limit", "maxSeconds"],
+  ]) {
+    if (document.activeElement !== $(id) && options[key] != null)
+      $(id).value = options[key];
+  }
+  if (document.activeElement !== $("tab-audio"))
+    $("tab-audio").checked = !!options.audio;
+  for (const area of document.querySelectorAll("textarea")) {
+    area.style.height = "auto";
+    area.style.height = area.scrollHeight + "px";
+  }
   $("pair").hidden = !!state.token;
   $("capture").hidden = !state.token;
   $("project-title").textContent = state.projectTitle || "";
@@ -29,17 +47,37 @@ async function refresh() {
   $("record").textContent = state.recording
     ? "Stop recording"
     : "Record interaction";
+  $("pause-record").hidden = !state.recording;
+  $("marker").hidden = !state.recording;
+  $("pause-record").textContent = state.recordPaused
+    ? "Resume recording"
+    : "Pause recording";
   $("editor-link").href = `${state.server}/projects/${state.projectId}`;
+  $("journey-checklist").replaceChildren(
+    JourneyChecklist(
+      options.journey || "",
+      state.journeyCompleted || [],
+      state.recording && !state.recordPaused,
+      (index, label) => command("JOURNEY_STEP", { index, label }),
+    ),
+  );
   const routes = $("routes");
-  routes.replaceChildren();
-  for (const [i, r] of (state.routes || []).entries()) {
-    routes.append(
-      RouteOption(r, (selected) => {
-        state.routes[i].selected = selected;
-        command("ROUTES", { routes: state.routes });
-      }),
-    );
+  const nextRoutes = JSON.stringify(state.routes);
+  if (nextRoutes !== routeVersion) {
+    routeVersion = nextRoutes;
+    routes.replaceChildren();
+    for (const [i, r] of (state.routes || []).entries()) {
+      routes.append(
+        RouteOption(r, (selected) => {
+          state.routes[i].selected = selected;
+          command("ROUTES", { routes: state.routes });
+        }),
+      );
+    }
   }
+  const nextCaptures = JSON.stringify(state.captures);
+  if (nextCaptures === captureVersion) return;
+  captureVersion = nextCaptures;
   const host = $("captures");
   host.replaceChildren();
   urls.forEach(URL.revokeObjectURL);
@@ -87,7 +125,12 @@ $("current").onclick = () =>
   action($("current"), () => command("CAPTURE", { label: $("label").value }));
 $("record").onclick = () =>
   action($("record"), () =>
-    command(state.recording ? "STOP_RECORD" : "RECORD"),
+    command(state.recording ? "STOP_RECORD" : "RECORD", {
+      audio: $("tab-audio").checked,
+      maxSeconds: Number($("record-limit").value),
+      journey: $("journey").value,
+      label: $("label").value,
+    }),
   );
 $("change").onclick = () => {
   $("pair").hidden = false;
@@ -98,3 +141,28 @@ chrome.runtime.onMessage.addListener((m) => {
     refresh().catch((e) => ($("message").textContent = e.message));
 });
 refresh().catch((e) => ($("message").textContent = e.message));
+
+$("pause-record").onclick = () =>
+  action($("pause-record"), () => command("PAUSE_RECORD"));
+$("marker").onclick = () =>
+  action($("marker"), () =>
+    command("MARKER", { label: $("label").value || "Result visible" }),
+  );
+
+for (const id of ["journey", "label", "record-limit", "tab-audio"]) {
+  $(id).addEventListener("input", () => {
+    if ($(id).tagName === "TEXTAREA") {
+      $(id).style.height = "auto";
+      $(id).style.height = $(id).scrollHeight + "px";
+    }
+    command("RECORD_OPTIONS", {
+      journey: $("journey").value,
+      label: $("label").value,
+      maxSeconds: Number($("record-limit").value),
+      audio: $("tab-audio").checked,
+    }).catch((e) => ($("message").textContent = e.message));
+  });
+}
+
+$("restart-journey").onclick = () =>
+  action($("restart-journey"), () => command("RESET_JOURNEY"));

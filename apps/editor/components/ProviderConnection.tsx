@@ -13,6 +13,8 @@ export type ProviderStatus = {
   configured: boolean;
   source?: string;
   suffix?: string;
+  verification?: string;
+  checkedAt?: string;
 };
 export function ProviderConnection({
   p,
@@ -20,12 +22,14 @@ export function ProviderConnection({
   busy,
   save,
   remove,
+  verify,
 }: {
   p: ProviderInfo;
   status: ProviderStatus[];
   busy: string;
   save: (provider: string, form: FormData) => Promise<void>;
   remove: (provider: string) => Promise<void>;
+  verify: (provider: string) => Promise<void>;
 }) {
   const s = status.find((x) => x.provider === p.id);
   return (
@@ -42,11 +46,31 @@ export function ProviderConnection({
         {s?.configured && (
           <span className="connected">
             <Check size={14} />
-            Connected
+            {s.verification === "verified" ? "Verified" : "Key saved"}
             {s.suffix ? ` ••••${s.suffix}` : " via environment"}
           </span>
         )}
       </div>
+      {s?.configured && (
+        <div className="connection-check">
+          <Button
+            className="text-link"
+            disabled={busy === p.id}
+            onClick={() => verify(p.id)}
+          >
+            Test connection
+          </Button>
+          <span>
+            {s.checkedAt
+              ? `${s.verification} · ${new Date(s.checkedAt).toLocaleString()}`
+              : "Not tested"}
+          </span>
+          <p className="field-help">
+            Checks account access without generating paid media. Individual
+            models may require additional permissions.
+          </p>
+        </div>
+      )}
       <form action={(form) => save(p.id, form)}>
         <label htmlFor={`key-${p.id}`}>
           {s?.configured ? "Replace API key" : "API key"}

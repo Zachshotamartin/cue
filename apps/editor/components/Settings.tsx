@@ -1,8 +1,10 @@
 "use client";
 import { useEffect, useState } from "react";
 import { AccountSettings } from "./AccountSettings";
+import { AccountHealth } from "./AccountHealth";
 import { ProviderConnection, type ProviderStatus } from "./ProviderConnection";
 import { api } from "./client-api";
+import Link from "next/link";
 const providers = [
   {
     id: "runway",
@@ -33,7 +35,7 @@ const providers = [
   {
     id: "elevenlabs",
     name: "ElevenLabs",
-    description: "Optional voice-over from your narration script.",
+    description: "Narration, instrumental music and sound effects.",
     url: "https://elevenlabs.io/app/settings/api-keys",
   },
 ];
@@ -69,6 +71,27 @@ export function Settings() {
       setMessage("Key saved with encryption.");
     } catch (e: any) {
       setMessage(e.message);
+    } finally {
+      setBusy("");
+    }
+  }
+  async function verify(provider: string) {
+    setBusy(provider);
+    setMessage("");
+    try {
+      const result = await api("/settings/verify", {
+        method: "POST",
+        body: JSON.stringify({ provider }),
+      });
+      const fresh = await api("/settings");
+      setStatus(fresh.providers);
+      setMessage(
+        result.status === "verified"
+          ? "Account access verified. No media generated."
+          : "The provider did not accept the connection. Check the key and its permissions.",
+      );
+    } catch (e) {
+      setMessage((e as Error).message);
     } finally {
       setBusy("");
     }
@@ -109,6 +132,7 @@ export function Settings() {
             busy={busy}
             save={save}
             remove={remove}
+            verify={verify}
           />
         ))}
       </div>
@@ -119,8 +143,12 @@ export function Settings() {
           They never appear in a project archive or reach the capture extension.
           Provider requests are sent only when you choose an AI operation.
         </p>
+        <Link className="text-link" href="/privacy">
+          Privacy and data processing ↗
+        </Link>
       </aside>
       <AccountSettings />
+      <AccountHealth />
     </main>
   );
 }

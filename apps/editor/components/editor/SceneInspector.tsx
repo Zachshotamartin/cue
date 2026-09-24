@@ -1,14 +1,19 @@
 "use client";
 import { Trash } from "@phosphor-icons/react";
+import { useState } from "react";
+import { ReviseSceneDialog } from "./ReviseSceneDialog";
 import { type Shot } from "../../../../packages/contracts";
 import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
 import { Select } from "../ui/Select";
 import { Textarea } from "../ui/Textarea";
 import { useEditor } from "./EditorContext";
+import { EmphasisEditor } from "./EmphasisEditor";
+import { ClipEditor } from "./ClipEditor";
 import { Disclosure } from "../ui/Disclosure";
 
 export function SceneInspector() {
+  const [revising, setRevising] = useState(false);
   const { tab, mutate, shot, editShot, sceneAssets } = useEditor();
   return (
     <>
@@ -29,6 +34,14 @@ export function SceneInspector() {
                 <Trash size={16} />
               </Button>
             </div>
+            <ClipEditor />
+            <EmphasisEditor />
+            <Button className="text-link" onClick={() => setRevising(true)}>
+              Ask AI to revise this scene
+            </Button>
+            {revising && (
+              <ReviseSceneDialog onClose={() => setRevising(false)} />
+            )}
             <label>
               Scene name
               <Input
@@ -172,7 +185,7 @@ export function SceneInspector() {
               Exact UI keeps your source intact. Generated and hybrid scenes
               need a selected take before export.
             </p>
-            <Disclosure title="Framing & trim">
+            <Disclosure title="Precise crop & color">
               <label>
                 Crop width{" "}
                 <span>{Math.round(shot.focalRect.width * 100)}%</span>

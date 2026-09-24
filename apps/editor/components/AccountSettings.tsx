@@ -1,5 +1,6 @@
 "use client";
 import { useRouter } from "next/navigation";
+import { DeleteAccountDialog } from "./DeleteAccountDialog";
 import { useState } from "react";
 import { authClient } from "../lib/auth-client";
 import { Button } from "./ui/Button";
@@ -7,6 +8,7 @@ export function AccountSettings() {
   const { data } = authClient.useSession();
   const [message, setMessage] = useState("");
   const router = useRouter();
+  const [deleting, setDeleting] = useState(false);
   async function signOut() {
     const r = await authClient.signOut();
     if (r.error) {
@@ -60,6 +62,15 @@ export function AccountSettings() {
           Sign out
         </Button>
       </div>
+      <Button className="text-link" onClick={() => setDeleting(true)}>
+        Delete account
+      </Button>
+      {deleting && data?.user && (
+        <DeleteAccountDialog
+          email={data.user.email}
+          onClose={() => setDeleting(false)}
+        />
+      )}
       {message && <p role="status">{message}</p>}
     </section>
   );

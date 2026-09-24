@@ -7,6 +7,7 @@ import { EditorWorkspace } from "./editor/EditorWorkspace";
 import { ProposalDialog } from "./editor/ProposalDialog";
 import { RecoveryBanner } from "./editor/RecoveryBanner";
 import { useEditorController } from "./editor/useEditorController";
+import { WorkflowSteps } from "./editor/WorkflowSteps";
 import { Notice } from "./ui/Notice";
 
 export function Editor({ id }: { id: string }) {
@@ -26,6 +27,7 @@ export function Editor({ id }: { id: string }) {
     <EditorContext value={state}>
       <div className="editor-shell theme-dark">
         <EditorHeader />
+        <WorkflowSteps />
         {(conflict || recovery) && <RecoveryBanner />}
 
         {(error || notice) && (

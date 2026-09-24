@@ -2,7 +2,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { get, put, del } from "@vercel/blob";
 import { dataDir, cloud } from "./config";
-export const cloudObjects = () => cloud || !!process.env.VERCEL;
+export const cloudObjects = () =>
+  process.env.CUE_STORAGE !== "local" && (cloud || !!process.env.VERCEL);
 function localPath(key: string) {
   if (!/^[a-zA-Z0-9_./-]+$/.test(key) || key.split("/").includes(".."))
     throw new Error("Invalid object path.");
@@ -39,7 +40,10 @@ export async function readObject(key: string) {
 }
 export async function deleteObject(key: string) {
   if (cloudObjects()) await del(key);
-  else await fs.unlink(localPath(key)).catch(() => {});
+  else
+    await fs.unlink(localPath(key)).catch((e: NodeJS.ErrnoException) => {
+      if (e.code !== "ENOENT") throw e;
+    });
 }
 export async function streamObject(key: string, range: string | null = null) {
   if (cloudObjects()) {

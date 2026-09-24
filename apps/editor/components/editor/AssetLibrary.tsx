@@ -10,6 +10,7 @@ import { Input } from "../ui/Input";
 import { useEditor } from "./EditorContext";
 import { SceneCard } from "./SceneCard";
 import { CaptureCard } from "./CaptureCard";
+import { RecordingAnalysis } from "./RecordingAnalysis";
 
 export function AssetLibrary() {
   const {
@@ -86,6 +87,7 @@ export function AssetLibrary() {
               {sceneAssets.map((a) => (
                 <CaptureCard key={a.id || "item"} a={a} />
               ))}
+              <RecordingAnalysis />
             </>
           )}
         </div>

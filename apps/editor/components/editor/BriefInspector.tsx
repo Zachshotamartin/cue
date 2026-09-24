@@ -11,6 +11,7 @@ import { api, jobOptions, money } from "../client-api";
 import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
 import { Select } from "../ui/Select";
+import { ProductBrief } from "./ProductBrief";
 import { Textarea } from "../ui/Textarea";
 import { useEditor } from "./EditorContext";
 
@@ -37,6 +38,7 @@ export function BriefInspector() {
       {tab === "brand" && (
         <>
           <h2>The film brief.</h2>
+          <ProductBrief />
           <label>
             What does your product do?
             <Textarea

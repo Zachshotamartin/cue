@@ -1,22 +1,19 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { db, initializeDatabase, rateLimit } from "../packages/storage/client";
 import {
-  initializeDatabase,
-  db,
-  tx,
-  rateLimit,
-} from "../packages/storage/client";
-import {
+  budget,
+  claimSpecificJob,
   createProject,
-  project,
   editProject,
   enqueue,
-  claimSpecificJob,
-  budget,
-  updateJob,
   getJob,
-  addAsset,
+  project,
   snapshot,
+  updateJob,
+  addAsset,
+  getAsset,
+  updateAssetMetadata,
 } from "../packages/storage/db";
 if (process.env.CUE_VERIFY_DATABASE !== "1" || !process.env.DATABASE_URL)
   throw new Error(
@@ -34,6 +31,30 @@ try {
   ]);
   assert.equal(edits.filter((r) => r.status === "fulfilled").length, 1);
   assert.equal((await project(id, owner)).revision, 2);
+  const assetId = randomUUID();
+  await addAsset({
+    id: assetId,
+    projectId: id,
+    kind: "image",
+    name: "concurrency-fixture.png",
+    mime: "image/png",
+    bytes: 1,
+    hash: "0".repeat(64),
+    path: `verify/${assetId}`,
+    metadata: {},
+    createdAt: new Date().toISOString(),
+  });
+  await Promise.all([
+    updateAssetMetadata(assetId, { privacyPending: true }),
+    updateAssetMetadata(assetId, {
+      rights: { credit: "Fixture author", license: "Test only", sourceUrl: "" },
+    }),
+    updateAssetMetadata(assetId, { analysis: { version: 2 } }),
+  ]);
+  const metadata = (await getAsset(assetId)).metadata;
+  assert.equal(metadata.privacyPending, true);
+  assert.ok(metadata.rights);
+  assert.ok(metadata.analysis);
   await assert.rejects(project(id, "another-owner"), /not found/);
   const key = randomUUID();
   const result = await Promise.all([
@@ -59,7 +80,7 @@ try {
   assert.equal(snap.jobs.length, 1);
   await db.prepare("DELETE FROM request_limits WHERE key=?").run(rateKey);
   console.log(
-    "Postgres: migrations, owner isolation, concurrent revisions, budget/idempotency, exclusive claims, rate limits and snapshots passed.",
+    "Postgres: migrations, owner isolation, concurrent revisions and asset metadata, budget/idempotency, exclusive claims, rate limits and snapshots passed.",
   );
 } finally {
   if (id)

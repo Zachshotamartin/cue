@@ -2,7 +2,7 @@ export async function api<T = any>(
   url: string,
   options: RequestInit = {},
 ): Promise<T> {
-  const r = await fetch(`/api${url}`, {
+  const r = await fetch(`/api${url.startsWith("/") ? "" : "/"}${url}`, {
     ...options,
     headers: {
       ...(options.body && typeof options.body === "string"
@@ -11,7 +11,15 @@ export async function api<T = any>(
       ...options.headers,
     },
   });
-  const x = await r.json();
+  const x = await r.json().catch(() => {
+    const error = new Error(
+      r.status >= 500
+        ? "Cue could not finish this request. Your saved work is safe; try again shortly."
+        : "The server returned an unexpected response. Reload the page and try again.",
+    );
+    Object.assign(error, { status: r.status });
+    throw error;
+  });
   if (!r.ok) {
     if (r.status === 401 && !location.pathname.startsWith("/auth/"))
       location.assign(

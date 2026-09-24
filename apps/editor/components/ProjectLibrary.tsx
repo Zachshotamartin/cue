@@ -5,11 +5,15 @@ import { useEffect, useState } from "react";
 import type { Project } from "../../../packages/contracts";
 import { api } from "./client-api";
 import { Button } from "./ui/Button";
+import { Input } from "./ui/Input";
 import { CreateFilmDialog } from "./CreateFilmDialog";
 import { ProjectCard } from "./ProjectCard";
+import { RestoreArchiveDialog } from "./RestoreArchiveDialog";
 export function ProjectLibrary() {
   const router = useRouter();
   const [showArchived, setShowArchived] = useState(false);
+  const [query, setQuery] = useState("");
+  const [restoring, setRestoring] = useState(false);
   const [projects, setProjects] = useState<
       (Project & {
         thumbnail?: string;
@@ -45,6 +49,13 @@ export function ProjectLibrary() {
       setPending(false);
     }
   }
+  const visible = projects.filter(
+    (p) =>
+      !!p.archived === showArchived &&
+      `${p.draft.title} ${p.draft.siteUrl}`
+        .toLowerCase()
+        .includes(query.toLowerCase()),
+  );
   return (
     <main className="library page-shell">
       <div className="page-heading">
@@ -63,6 +74,16 @@ export function ProjectLibrary() {
         </p>
       )}
       <div className="library-filter">
+        <Button className="text-link" onClick={() => setRestoring(true)}>
+          Restore archive
+        </Button>
+        <Input
+          type="search"
+          aria-label="Search films"
+          placeholder="Search films"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
         <Button
           className="text-link"
           aria-pressed={!showArchived}
@@ -84,22 +105,23 @@ export function ProjectLibrary() {
           <div />
           <div />
         </div>
-      ) : projects.filter((p) => !!p.archived === showArchived).length ? (
+      ) : visible.length ? (
         <div className="project-grid">
-          {projects
-            .filter((p) => !!p.archived === showArchived)
-            .map((p) => (
-              <ProjectCard
-                key={p.id}
-                p={p}
-                setError={setError}
-                onArchive={(id, archived) =>
-                  setProjects((list) =>
-                    list.map((x) => (x.id === id ? { ...x, archived } : x)),
-                  )
-                }
-              />
-            ))}
+          {visible.map((p) => (
+            <ProjectCard
+              key={p.id}
+              p={p}
+              setError={setError}
+              onDeleted={(id) =>
+                setProjects((list) => list.filter((p) => p.id !== id))
+              }
+              onArchive={(id, archived) =>
+                setProjects((list) =>
+                  list.map((x) => (x.id === id ? { ...x, archived } : x)),
+                )
+              }
+            />
+          ))}
         </div>
       ) : (
         <div className="empty-library">
@@ -110,8 +132,9 @@ export function ProjectLibrary() {
               <br />A lot of possibility.
             </h2>
             <p>
-              Create your first film, then capture a website or import a few
-              screens.
+              {query
+                ? "No matching films. Try another name or website."
+                : "Create your first film, then capture a website or import a few screens."}
             </p>
             <Button className="text-link" onClick={() => setCreating(true)}>
               Create a film <ArrowRight size={18} />
@@ -130,6 +153,9 @@ export function ProjectLibrary() {
           create={create}
           onClose={() => setCreating(false)}
         />
+      )}
+      {restoring && (
+        <RestoreArchiveDialog onClose={() => setRestoring(false)} />
       )}
     </main>
   );

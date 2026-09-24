@@ -1,10 +1,11 @@
 import { z } from "zod";
-import { validWorkerToken } from "./worker-token";
-import { getJob, updateJob, assets, takes, tx, db } from "../storage/db";
-import { assetSignature, origin } from "../storage/config";
-import { writeObject, readObject } from "../storage/objects";
-import { readBounded, importMedia } from "../storage/media";
 import { dimensions } from "../contracts";
+import { assetSignature, origin } from "../storage/config";
+import { assets, getJob, takes, tx, updateJob } from "../storage/db";
+import { attachExportManifest, validateExportInput } from "../storage/manifest";
+import { importMedia, readBounded } from "../storage/media";
+import { readObject, writeObject } from "../storage/objects";
+import { validWorkerToken } from "./worker-token";
 export async function renderCallback(req: Request, id: string, op: string[]) {
   const token = req.headers.get("authorization")?.replace(/^Bearer /, "") || "";
   if (!validWorkerToken(id, token))
@@ -18,7 +19,14 @@ export async function renderCallback(req: Request, id: string, op: string[]) {
   const json = (x: unknown) =>
     Response.json(x, { headers: { "Cache-Control": "no-store" } });
   if (op[0] === "manifest" && req.method === "GET") {
-    const media = await assets(job.projectId);
+    await validateExportInput(job);
+    const media = (await assets(job.projectId)).filter(
+      (a) =>
+        !job.payload.manifest ||
+        job.payload.manifest.sources.some(
+          (ref: { id: string }) => ref.id === a.id,
+        ),
+    );
     return json({
       inputProps: {
         draft: job.payload.draft,
@@ -106,6 +114,7 @@ export async function renderCallback(req: Request, id: string, op: string[]) {
           Math.abs((asset.duration || 0) - duration) > 0.2
         )
           throw new Error("Export validation failed.");
+        await attachExportManifest(asset.id, job);
         await updateJob(fresh, {
           state: "retrieving",
           outputAssetId: asset.id,

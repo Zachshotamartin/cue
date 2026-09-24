@@ -66,6 +66,37 @@ export const shotSchema = z.object({
   focalRect: rectSchema.default({ x: 0, y: 0, width: 1, height: 1 }),
   selectedTakeId: z.string().nullable().default(null),
   trimStart: z.number().min(0).max(600).default(0),
+  playbackRate: z.number().min(0.5).max(3).default(1),
+  sourceAudioVolume: z.number().min(0).max(1).default(0),
+  locked: z.boolean().default(false),
+  action: z.string().max(250).default(""),
+  outcome: z.string().max(250).default(""),
+  presentation: z.enum(["framed", "full"]).default("framed"),
+  focalEnd: rectSchema.nullable().default(null),
+  emphasis: z
+    .array(
+      z.object({
+        at: z.number().min(0).max(20),
+        duration: z.number().min(0.2).max(10).default(1.5),
+        x: z.number().min(0).max(1),
+        y: z.number().min(0).max(1),
+        label: z.string().max(80).default(""),
+      }),
+    )
+    .max(20)
+    .default([]),
+  speechCues: z
+    .array(
+      z
+        .object({
+          start: z.number().min(0),
+          end: z.number().positive(),
+          text: z.string().max(200),
+        })
+        .refine((c) => c.end > c.start, "Caption end must follow its start"),
+    )
+    .max(100)
+    .default([]),
   background: z
     .string()
     .regex(/^#[0-9a-f]{6}$/i)
@@ -80,6 +111,46 @@ export const brandSchema = z.object({
   font: z.enum(["Manrope", "Arial", "Georgia"]),
 });
 export const draftSchema = z.object({
+  version: z.literal(2).default(2),
+  productName: z.string().max(100).default(""),
+  objective: z.enum(["auto", "demonstration", "teaser"]).default("auto"),
+  targetSeconds: z.number().int().min(15).max(90).default(30),
+  channel: z.enum(["website", "social", "presentation"]).default("website"),
+  features: z.array(z.string().max(150)).max(8).default([]),
+  journey: z.string().max(1000).default(""),
+  ctaUrl: z.string().max(2048).default(""),
+  narrationVoiceId: z.string().max(80).default(""),
+  pronunciationDictionaries: z
+    .array(
+      z.object({
+        pronunciation_dictionary_id: z
+          .string()
+          .min(1)
+          .max(100)
+          .regex(/^[\w-]+$/),
+        version_id: z
+          .string()
+          .min(1)
+          .max(100)
+          .regex(/^[\w-]+$/),
+      }),
+    )
+    .max(3)
+    .default([]),
+  soundCues: z
+    .array(
+      z.object({
+        id: z.string(),
+        assetId: z.string(),
+        at: z.number().min(0).max(600),
+        trimStart: z.number().min(0).max(600).default(0),
+        duration: z.number().min(0.1).max(60),
+        volume: z.number().min(0).max(1).default(0.3),
+        fade: z.number().min(0).max(3).default(0.2),
+      }),
+    )
+    .max(40)
+    .default([]),
   title: z.string().min(1).max(100),
   siteUrl: z.string().max(2048),
   audience: z.string().max(500),
@@ -135,7 +206,15 @@ export type Project = {
 export type Job = {
   id: string;
   projectId: string;
-  kind: "plan" | "generate" | "render" | "narrate";
+  kind:
+    | "plan"
+    | "generate"
+    | "render"
+    | "narrate"
+    | "redact"
+    | "analyze"
+    | "music"
+    | "sound";
   state:
     | "queued"
     | "submitting"
@@ -147,6 +226,7 @@ export type Job = {
     | "unknown";
   progress: number;
   payload: Record<string, any>;
+  inputHash?: string;
   providerTaskId: string | null;
   workflowId?: string;
   sandboxId?: string;
@@ -197,7 +277,7 @@ export function dimensions(format: Draft["format"]) {
       : { width: 1920, height: 1080 };
 }
 export function defaultDraft(title: string, siteUrl = ""): Draft {
-  return {
+  return draftSchema.parse({
     title,
     siteUrl,
     audience: "People discovering your product",
@@ -218,7 +298,7 @@ export function defaultDraft(title: string, siteUrl = ""): Draft {
     musicAssetId: null,
     musicVolume: 0.16,
     budgetCents: 1000,
-  };
+  });
 }
 export function durationFrames(draft: Draft, fps = 30) {
   return Math.max(
